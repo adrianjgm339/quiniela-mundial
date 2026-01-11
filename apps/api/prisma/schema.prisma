@@ -1,0 +1,272 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  FINISHED
+  SUSPENDED
+}
+
+enum PickStatus {
+  VALID
+  LATE
+  VOID
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  role         UserRole @default(USER)
+
+  // 🔽 NUEVO — evento activo del usuario
+  activeSeasonId String?
+  activeSeason   Season? @relation(fields: [activeSeasonId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leaguesCreated League[]
+  memberships    LeagueMember[]
+  picks          Pick[]
+  countryCode String? // ej: "VE", "US", "MX"
+}
+
+model Sport {
+  id           String             @id @default(uuid())
+  slug         String             @unique // "soccer"
+  translations SportTranslation[]
+  competitions Competition[]
+}
+
+model SportTranslation {
+  id      String @id @default(uuid())
+  sportId String
+  locale  String // "es", "en"
+  name    String
+
+  sport Sport @relation(fields: [sportId], references: [id])
+
+  @@unique([sportId, locale])
+}
+
+model Competition {
+  id           String                   @id @default(uuid())
+  sportId      String
+  slug         String                   @unique // "fifa-world-cup"
+  translations CompetitionTranslation[]
+  sport        Sport                    @relation(fields: [sportId], references: [id])
+  seasons      Season[]
+}
+
+model CompetitionTranslation {
+  id            String @id @default(uuid())
+  competitionId String
+  locale        String
+  name          String
+
+  competition Competition @relation(fields: [competitionId], references: [id])
+
+  @@unique([competitionId, locale])
+}
+
+model Season {
+  id            String              @id @default(uuid())
+  competitionId String
+  slug          String              @unique
+  startDate     DateTime?
+  endDate       DateTime?
+  translations  SeasonTranslation[]
+  competition   Competition         @relation(fields: [competitionId], references: [id])
+  leagues       League[]
+  teams         Team[]
+  matches       Match[]
+  // 🔽 NUEVO — usuarios que tienen esta season activa
+  activeUsers   User[]
+}
+
+model SeasonTranslation {
+  id       String @id @default(uuid())
+  seasonId String
+  locale   String
+  name     String
+
+  season Season @relation(fields: [seasonId], references: [id])
+
+  @@unique([seasonId, locale])
+}
+
+model League {
+  id          String   @id @default(uuid())
+  seasonId    String
+  name        String
+  joinCode    String   @unique // para unirse
+  createdById String
+  createdAt   DateTime @default(now())
+
+  season        Season         @relation(fields: [seasonId], references: [id])
+  createdBy     User           @relation(fields: [createdById], references: [id])
+  members       LeagueMember[]
+  picks         Pick[]
+  scoringRuleId String?
+  scoringRule   ScoringRule?   @relation(fields: [scoringRuleId], references: [id])
+}
+
+model LeagueMember {
+  id       String       @id @default(uuid())
+  leagueId String
+  userId   String
+  status   MemberStatus @default(ACTIVE)
+  joinedAt DateTime     @default(now())
+
+  league League @relation(fields: [leagueId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([leagueId, userId])
+}
+
+model Team {
+  id              String  @id @default(uuid())
+  seasonId        String
+  externalId      String // A001, P901, etc (Excel EquipoID)
+  flagKey         String? // Excel Cd_equipo (mx, za, etc.)
+  groupCode       String? // Excel Grupo (A..H). En placeholders puede ser null
+  confed          String? // Excel Confederación
+  isPlaceholder   Boolean @default(false) // P901, Repechajes, etc
+  placeholderRule String? // texto tipo "2º Grupo A", "REPECHAJE UEFA 4"
+
+  createdAt DateTime @default(now())
+
+  season Season @relation(fields: [seasonId], references: [id])
+
+  translations TeamTranslation[]
+
+  homeMatches Match[] @relation("HomeTeam")
+  awayMatches Match[] @relation("AwayTeam")
+
+  @@unique([seasonId, externalId])
+}
+
+model TeamTranslation {
+  id     String @id @default(uuid())
+  teamId String
+  locale String
+  name   String
+
+  team Team @relation(fields: [teamId], references: [id])
+
+  @@unique([teamId, locale])
+}
+
+model Match {
+  id          String  @id @default(uuid())
+  seasonId    String
+  externalId  String // Excel PartidoID (F01A001A002)
+  phaseCode   String // Excel FaseID (F01, F02...)
+  groupCode   String? // Excel Grupo (solo fase grupos)
+  matchNumber Int? // Excel NroPartido
+  venue       String? // Excel Sede
+
+  utcDateTime  DateTime // Excel FechaHoraUTC
+  closeUtc     DateTime? // Excel CierraPronosticoUTC
+  closeMinutes Int? // Excel MinutosCierre
+
+  status          MatchStatus @default(SCHEDULED)
+  statusRaw       String? // Excel EstadoPartido (Programado, etc)
+  resultConfirmed Boolean     @default(false) // Excel ResultadoConfirmado (SI/No)
+
+  homeTeamId String
+  awayTeamId String
+  homeScore  Int?
+  awayScore  Int?
+
+  season   Season @relation(fields: [seasonId], references: [id])
+  homeTeam Team   @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam Team   @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  picks    Pick[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([seasonId, externalId])
+  @@index([seasonId, utcDateTime])
+}
+
+model Pick {
+  id       String      @id @default(uuid())
+  leagueId String
+  matchId  String
+  userId   String
+  scores   PickScore[]
+
+  homePred Int
+  awayPred Int
+  status   PickStatus @default(VALID)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  league League @relation(fields: [leagueId], references: [id])
+  match  Match  @relation(fields: [matchId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([leagueId, matchId, userId])
+  @@index([leagueId])
+  @@index([matchId])
+}
+
+model ScoringRule {
+  id          String   @id // ej: "B01", "R01", "R02"...
+  name        String
+  description String?
+  isGlobal    Boolean  @default(false) // true solo para B01 (si quieres)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  details    ScoringRuleDetail[]
+  leagues    League[]
+  pickScores PickScore[]
+}
+
+model ScoringRuleDetail {
+  id     String      @id @default(cuid())
+  ruleId String
+  rule   ScoringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  code   String // "EXACTO", "RESULTADO", "BONUS_DIF", "GOLES_LOCAL", "GOLES_VISITA", etc.
+  points Int
+
+  @@unique([ruleId, code])
+}
+
+model PickScore {
+  id     String @id @default(cuid())
+  pickId String
+  ruleId String
+
+  pick Pick        @relation(fields: [pickId], references: [id], onDelete: Cascade)
+  rule ScoringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  points Int
+
+  @@unique([pickId, ruleId])
+}

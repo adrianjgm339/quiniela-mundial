@@ -1,0 +1,113 @@
+﻿EquipoID;TorneoID;NombreTorneo;Cd_equipo;Equipo;Grupo;Confederación;Auxiliar para clasificación manual;🏳️
+A001;CP2026;Copa Mundial 2026;mx;MÉXICO;A;CONCACAF;;Imagen
+A002;CP2026;Copa Mundial 2026;za;SUDÁFRICA;A;CAF;;Imagen
+A003;CP2026;Copa Mundial 2026;kr;COREA DEL SUR;A;AFC;;Imagen
+A004;CP2026;Copa Mundial 2026;;REPECHAJE UEFA 4;A;UEFA;;
+B005;CP2026;Copa Mundial 2026;ca;CANADÁ;B;CONCACAF;;Imagen
+B006;CP2026;Copa Mundial 2026;;REPECHAJE UEFA 1;B;UEFA;;
+B007;CP2026;Copa Mundial 2026;qa;CATAR;B;AFC;;Imagen
+B008;CP2026;Copa Mundial 2026;ch;SUIZA;B;UEFA;;Imagen
+C009;CP2026;Copa Mundial 2026;br;BRASIL;C;CONMEBOL;;Imagen
+C010;CP2026;Copa Mundial 2026;ma;MARRUECOS;C;CAF;;Imagen
+C011;CP2026;Copa Mundial 2026;ht;HAITÍ;C;CONCACAF;;Imagen
+C012;CP2026;Copa Mundial 2026;gb-sct;ESCOCIA;C;UEFA;;Imagen
+D013;CP2026;Copa Mundial 2026;us;ESTADOS UNIDOS;D;CONCACAF;;Imagen
+D014;CP2026;Copa Mundial 2026;py;PARAGUAY;D;CONMEBOL;;Imagen
+D015;CP2026;Copa Mundial 2026;au;AUSTRALIA;D;AFC;;Imagen
+D016;CP2026;Copa Mundial 2026;;REPECHAJE UEFA 3;D;UEFA;;
+E017;CP2026;Copa Mundial 2026;de;ALEMANIA;E;UEFA;;Imagen
+E018;CP2026;Copa Mundial 2026;cw;CURAZAO;E;CONCACAF;;Imagen
+E019;CP2026;Copa Mundial 2026;ci;COSTA DE MARFIL;E;CAF;;Imagen
+E020;CP2026;Copa Mundial 2026;ec;ECUADOR;E;CONMEBOL;;Imagen
+F021;CP2026;Copa Mundial 2026;nl;PAÍSES BAJOS;F;UEFA;;Imagen
+F022;CP2026;Copa Mundial 2026;jp;JAPÓN;F;AFC;;Imagen
+F023;CP2026;Copa Mundial 2026;;REPECHAJE UEFA 2;F;UEFA;;
+F024;CP2026;Copa Mundial 2026;tn;TÚNEZ;F;CAF;;Imagen
+G025;CP2026;Copa Mundial 2026;be;BÉLGICA;G;UEFA;;Imagen
+G026;CP2026;Copa Mundial 2026;eg;EGIPTO;G;CAF;;Imagen
+G027;CP2026;Copa Mundial 2026;ir;IRÁN;G;AFC;;Imagen
+G028;CP2026;Copa Mundial 2026;nz;NUEVA ZELANDA;G;OFC;;Imagen
+H029;CP2026;Copa Mundial 2026;es;ESPAÑA;H;UEFA;;Imagen
+H030;CP2026;Copa Mundial 2026;cv;CABO VERDE;H;CAF;;Imagen
+H031;CP2026;Copa Mundial 2026;sa;ARABIA SAUDITA;H;AFC;;Imagen
+H032;CP2026;Copa Mundial 2026;uy;URUGUAY;H;CONMEBOL;;Imagen
+I033;CP2026;Copa Mundial 2026;fr;FRANCIA;I;UEFA;;Imagen
+I034;CP2026;Copa Mundial 2026;sn;SENEGAL;I;CAF;;Imagen
+I035;CP2026;Copa Mundial 2026;;REPECHAJE INTERNACIONAL 2;I;FIFA;;
+I036;CP2026;Copa Mundial 2026;no;NORUEGA;I;UEFA;;Imagen
+J037;CP2026;Copa Mundial 2026;ar;ARGENTINA;J;CONMEBOL;;Imagen
+J038;CP2026;Copa Mundial 2026;dz;ARGELIA;J;CAF;;Imagen
+J039;CP2026;Copa Mundial 2026;at;AUSTRIA;J;UEFA;;Imagen
+J040;CP2026;Copa Mundial 2026;jo;JORDANIA;J;AFC;;Imagen
+K041;CP2026;Copa Mundial 2026;pt;PORTUGAL;K;UEFA;;Imagen
+K042;CP2026;Copa Mundial 2026;;REPECHAJE INTERNACIONAL 1;K;FIFA;;
+K043;CP2026;Copa Mundial 2026;uz;UZBEKISTÁN;K;AFC;;Imagen
+K044;CP2026;Copa Mundial 2026;co;COLOMBIA;K;CONMEBOL;;Imagen
+L045;CP2026;Copa Mundial 2026;gb-eng;INGLATERRA;L;UEFA;;Imagen
+L046;CP2026;Copa Mundial 2026;hr;CROACIA;L;UEFA;;Imagen
+L047;CP2026;Copa Mundial 2026;gh;GHANA;L;CAF;;Imagen
+L048;CP2026;Copa Mundial 2026;pa;PANAMÁ;L;CONCACAF;;Imagen
+P901;CP2026;Copa Mundial 2026;;2º Grupo A;;;;
+P902;CP2026;Copa Mundial 2026;;2º Grupo B;;;;
+P903;CP2026;Copa Mundial 2026;;1º Grupo E;;;;
+P904;CP2026;Copa Mundial 2026;;3º Grupo A/B/C/D/F;;;;
+P905;CP2026;Copa Mundial 2026;;1º Grupo F;;;;
+P906;CP2026;Copa Mundial 2026;;2º Grupo C;;;;
+P907;CP2026;Copa Mundial 2026;;2º Grupo F;;;;
+P908;CP2026;Copa Mundial 2026;;1º Grupo I;;;;
+P909;CP2026;Copa Mundial 2026;;3º Grupo C/D/F/G/H;;;;
+P910;CP2026;Copa Mundial 2026;;2º Grupo E;;;;
+P911;CP2026;Copa Mundial 2026;;2º Grupo I;;;;
+P912;CP2026;Copa Mundial 2026;;1º Grupo A;;;;
+P913;CP2026;Copa Mundial 2026;;3º Grupo C/E/F/H/I;;;;
+P914;CP2026;Copa Mundial 2026;;1º Grupo L;;;;
+P915;CP2026;Copa Mundial 2026;;3º Grupo E/H/I/J/K;;;;
+P916;CP2026;Copa Mundial 2026;;1º Grupo D;;;;
+P917;CP2026;Copa Mundial 2026;;3º Grupo B/E/F/I/J;;;;
+P918;CP2026;Copa Mundial 2026;;1º Grupo G;;;;
+P919;CP2026;Copa Mundial 2026;;3º Grupo A/E/H/I/J;;;;
+P920;CP2026;Copa Mundial 2026;;2º Grupo K;;;;
+P921;CP2026;Copa Mundial 2026;;2º Grupo L;;;;
+P922;CP2026;Copa Mundial 2026;;1º Grupo H;;;;
+P923;CP2026;Copa Mundial 2026;;2º Grupo J;;;;
+P924;CP2026;Copa Mundial 2026;;1º Grupo B;;;;
+P925;CP2026;Copa Mundial 2026;;3º Grupo E/F/G/I/J;;;;
+P926;CP2026;Copa Mundial 2026;;1º Grupo J;;;;
+P927;CP2026;Copa Mundial 2026;;2º Grupo H;;;;
+P928;CP2026;Copa Mundial 2026;;1º Grupo K;;;;
+P929;CP2026;Copa Mundial 2026;;3º Grupo D/E/I/J/L;;;;
+P930;CP2026;Copa Mundial 2026;;2º Grupo D;;;;
+P931;CP2026;Copa Mundial 2026;;2º Grupo G;;;;
+P964;CP2026;Copa Mundial 2026;;1º Grupo C;;;;
+P932;CP2026;Copa Mundial 2026;;Ganador partido 74;;;;
+P933;CP2026;Copa Mundial 2026;;Ganador partido 77;;;;
+P934;CP2026;Copa Mundial 2026;;Ganador partido 73;;;;
+P935;CP2026;Copa Mundial 2026;;Ganador partido 75;;;;
+P936;CP2026;Copa Mundial 2026;;Ganador partido 76;;;;
+P937;CP2026;Copa Mundial 2026;;Ganador partido 78;;;;
+P938;CP2026;Copa Mundial 2026;;Ganador partido 79;;;;
+P939;CP2026;Copa Mundial 2026;;Ganador partido 80;;;;
+P940;CP2026;Copa Mundial 2026;;Ganador partido 83;;;;
+P941;CP2026;Copa Mundial 2026;;Ganador partido 84;;;;
+P942;CP2026;Copa Mundial 2026;;Ganador partido 81;;;;
+P943;CP2026;Copa Mundial 2026;;Ganador partido 82;;;;
+P944;CP2026;Copa Mundial 2026;;Ganador partido 86;;;;
+P945;CP2026;Copa Mundial 2026;;Ganador partido 88;;;;
+P946;CP2026;Copa Mundial 2026;;Ganador partido 85;;;;
+P947;CP2026;Copa Mundial 2026;;Ganador partido 87;;;;
+P948;CP2026;Copa Mundial 2026;;Ganador partido 89;;;;
+P949;CP2026;Copa Mundial 2026;;Ganador partido 90;;;;
+P950;CP2026;Copa Mundial 2026;;Ganador partido 93;;;;
+P951;CP2026;Copa Mundial 2026;;Ganador partido 94;;;;
+P952;CP2026;Copa Mundial 2026;;Ganador partido 91;;;;
+P953;CP2026;Copa Mundial 2026;;Ganador partido 92;;;;
+P954;CP2026;Copa Mundial 2026;;Ganador partido 95;;;;
+P955;CP2026;Copa Mundial 2026;;Ganador partido 96;;;;
+P956;CP2026;Copa Mundial 2026;;Ganador partido 97;;;;
+P957;CP2026;Copa Mundial 2026;;Ganador partido 98;;;;
+P958;CP2026;Copa Mundial 2026;;Ganador partido 99;;;;
+P959;CP2026;Copa Mundial 2026;;Ganador partido 100;;;;
+P960;CP2026;Copa Mundial 2026;;Perdedor partido 101;;;;
+P961;CP2026;Copa Mundial 2026;;Perdedor partido 102;;;;
+P962;CP2026;Copa Mundial 2026;;Ganador partido 101;;;;
+P963;CP2026;Copa Mundial 2026;;Ganador partido 102;;;;

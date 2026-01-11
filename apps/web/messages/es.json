@@ -1,0 +1,19 @@
+{
+    "login": {
+      "title": "Iniciar sesión",
+      "email": "Correo",
+      "password": "Contraseña",
+      "submit": "Entrar"
+    },
+    "dashboard": {
+      "title": "Panel",
+      "loading": "Cargando usuario..."
+    },
+    "matchStatus": {
+      "SCHEDULED": "Programado",
+      "LIVE": "En juego",
+      "FINISHED": "Finalizado",
+      "SUSPENDED": "Suspendido"
+    }
+  }
+  
