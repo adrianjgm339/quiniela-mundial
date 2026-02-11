@@ -1,15 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createLeague, getMyLeagues, joinLeagueByCode, type ApiLeague } from '@/lib/api';
+import AiChatWidget from '../../components/AiChatWidget';
 
 export default function LeaguesPage() {
   const router = useRouter();
   const { locale } = useParams<{ locale: string }>();
 
   const [token, setToken] = useState<string | null>(null);
-
   const [leagues, setLeagues] = useState<ApiLeague[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +21,6 @@ export default function LeaguesPage() {
 
   const [activeSeasonId, setActiveSeasonId] = useState<string | null>(null);
 
-  // 1) auth + seasonId (desde /auth/me o localStorage fallback)
   useEffect(() => {
     const t = localStorage.getItem('token');
     if (!t) {
@@ -30,13 +29,10 @@ export default function LeaguesPage() {
     }
     setToken(t);
 
-    // Fallback temporal si aún no viene del backend:
     const lsSeason = localStorage.getItem('activeSeasonId');
     if (lsSeason) setActiveSeasonId(lsSeason);
-
   }, [locale, router]);
 
-  // 2) cargar ligas
   useEffect(() => {
     if (!token) return;
 
@@ -66,6 +62,7 @@ export default function LeaguesPage() {
       setError('No hay un evento activo (Season). Selecciona un evento primero.');
       return;
     }
+
     const name = newName.trim();
     if (!name) {
       setError('Escribe un nombre de liga.');
@@ -80,7 +77,6 @@ export default function LeaguesPage() {
       setLeagues((prev) => [league, ...prev]);
       setNewName('');
 
-      // Auto-seleccionar la liga recién creada
       localStorage.setItem('activeLeagueId', league.id);
       localStorage.setItem('activeLeagueName', league.name);
       router.push(`/${locale}/matches`);
@@ -93,6 +89,7 @@ export default function LeaguesPage() {
 
   async function onJoin() {
     if (!token) return;
+
     const code = joinCode.trim().toUpperCase();
     if (!code) {
       setError('Escribe el código para unirte.');
@@ -105,7 +102,6 @@ export default function LeaguesPage() {
     try {
       const res = await joinLeagueByCode(token, { joinCode: code });
 
-      // refrescar ligas y auto seleccionar la liga encontrada
       const data = await getMyLeagues(token);
       setLeagues(data);
 
@@ -113,18 +109,27 @@ export default function LeaguesPage() {
       if (joined) {
         localStorage.setItem('activeLeagueId', joined.id);
         localStorage.setItem('activeLeagueName', joined.name);
-        router.push(`/${locale}/matches`);
       } else {
-        // si por algún motivo no viene todavía, solo guardamos el ID
         localStorage.setItem('activeLeagueId', res.leagueId);
-        router.push(`/${locale}/matches`);
       }
+
+      router.push(`/${locale}/matches`);
     } catch (e: any) {
       setError(e?.message ?? 'Error uniéndose a la liga');
     } finally {
       setJoining(false);
     }
   }
+
+  const aiContext = useMemo(() => {
+    return {
+      page: 'leagues',
+      locale,
+      activeSeasonId,
+      leaguesCount: leagues.length,
+      nowUtc: new Date().toISOString(),
+    };
+  }, [locale, activeSeasonId, leagues.length]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
@@ -155,7 +160,6 @@ export default function LeaguesPage() {
           </div>
         )}
 
-        {/* Crear liga */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <div className="font-medium">Crear liga</div>
           <div className="mt-3 flex gap-2">
@@ -173,12 +177,8 @@ export default function LeaguesPage() {
               {creating ? 'Creando…' : 'Crear'}
             </button>
           </div>
-          <div className="mt-2 text-xs text-zinc-500">
-            (MVP) La liga se crea en el evento activo. Luego agregaremos privacidad, reglas, etc.
-          </div>
         </div>
 
-        {/* Unirse por código */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <div className="font-medium">Unirse por código</div>
           <div className="mt-3 flex gap-2">
@@ -198,7 +198,6 @@ export default function LeaguesPage() {
           </div>
         </div>
 
-        {/* Lista de ligas */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
           <div className="px-4 py-3 border-b border-zinc-800 font-medium">Mis ligas</div>
 
@@ -231,6 +230,8 @@ export default function LeaguesPage() {
           )}
         </div>
       </div>
+
+      <AiChatWidget locale={locale} token={token} context={aiContext} />
     </div>
   );
 }
