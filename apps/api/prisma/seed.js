@@ -148,12 +148,14 @@ async function main() {
         name: r.name,
         description: r.description,
         isGlobal: r.isGlobal,
+        seasonId: season.id,
       },
       create: {
         id: r.id,
         name: r.name,
         description: r.description,
         isGlobal: r.isGlobal,
+        seasonId: season.id,
       },
     });
 
@@ -211,6 +213,32 @@ async function main() {
       activeSeasonId: season.id,
     },
   });
+
+  // Set default (standard) rule for this season
+  await prisma.season.update({
+    where: { id: season.id },
+    data: { defaultScoringRuleId: "B01" },
+  });
+
+  // Concepts allowed for this season (soccer)
+  const soccerConcepts = [
+    { code: "EXACTO", label: "Marcador exacto" },
+    { code: "RESULTADO", label: "Resultado (ganador/empate)" },
+    { code: "BONUS_DIF", label: "Bonus diferencia exacta" },
+    { code: "GOLES_LOCAL", label: "Goles local" },
+    { code: "GOLES_VISITA", label: "Goles visita" },
+    { code: "KO_GANADOR_FINAL", label: "KO ganador (cuando predices empate)" },
+  ];
+
+  for (const c of soccerConcepts) {
+    await prisma.seasonScoringConcept.upsert({
+      where: { seasonId_code: { seasonId: season.id, code: c.code } },
+      update: { label: c.label },
+      create: { seasonId: season.id, code: c.code, label: c.label },
+    });
+  }
+
+  console.log("Seed OK: season scoring concepts (soccer)");
 
   console.log("Seed OK: soccer / fifa-world-cup / world-cup-2026");
   console.log("Seed OK: scoring rules (B01, R01-R05)");

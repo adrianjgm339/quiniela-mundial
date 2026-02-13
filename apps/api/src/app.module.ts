@@ -13,8 +13,8 @@ import { PicksModule } from './picks/picks.module';
 import { LeaguesModule } from './leagues/leagues.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { LeaderboardsModule } from './leaderboards/leaderboards.module';
+import { AdminGroupsModule } from './admin-groups/admin-groups.module';
 import { AiModule } from './ai/ai.module';
-
 
 @Module({
   imports: [
@@ -37,6 +37,7 @@ import { AiModule } from './ai/ai.module';
     LeaguesModule,
     ScoringModule,
     LeaderboardsModule,
+    AdminGroupsModule,
     AiModule,
   ],
   controllers: [AppController],

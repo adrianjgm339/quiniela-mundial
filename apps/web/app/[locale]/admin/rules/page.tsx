@@ -1,9 +1,11 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+
 import {
   me,
+  getCatalog,
+  getMyLeagues,
   listScoringRules,
   getScoringRule,
   updateScoringRule,
@@ -12,6 +14,8 @@ import {
   recomputeScoring,
   type ApiScoringRule,
   type ApiScoringRuleDetail,
+  type CatalogSport,
+  type ApiLeague,
 } from "@/lib/api";
 
 const DEFAULT_CODES: Array<{ code: string; label: string }> = [
@@ -20,7 +24,31 @@ const DEFAULT_CODES: Array<{ code: string; label: string }> = [
   { code: "BONUS_DIF", label: "Diferencia de goles" },
   { code: "GOLES_LOCAL", label: "Acierta goles local" },
   { code: "GOLES_VISITA", label: "Acierta goles visita" },
+  { code: "KO_GANADOR_FINAL", label: "KO: acierta quién avanza" },
 ];
+
+const SYSTEM_RULE_IDS = new Set(["B01", "R01", "R02", "R03", "R04", "R05", 'BB01', 'BB02', 'BB03']);
+
+function inferSportCompetitionFromSeason(catalog: CatalogSport[], seasonId: string) {
+  for (const s of catalog ?? []) {
+    for (const c of s.competitions ?? []) {
+      const found = (c.seasons ?? []).some((se) => se.id === seasonId);
+      if (found) return { sportId: s.id, competitionId: c.id };
+    }
+  }
+  return { sportId: "", competitionId: "" };
+}
+
+function findSeasonName(catalog: CatalogSport[], seasonId: string) {
+  for (const s of catalog ?? []) {
+    for (const c of s.competitions ?? []) {
+      const se = (c.seasons ?? []).find((x) => x.id === seasonId);
+      if (se) return se.name ?? "";
+    }
+  }
+  return "";
+}
+
 
 export default function AdminRulesPage() {
   const router = useRouter();
@@ -30,7 +58,25 @@ export default function AdminRulesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [rules, setRules] = useState<ApiScoringRule[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("B01");
+  const [selectedId, setSelectedId] = useState<string>("");
+
+  const [user, setUser] = useState<any | null>(null);
+
+  // Contexto (Deporte → Competición → Evento → Liga)
+  const [catalog, setCatalog] = useState<CatalogSport[]>([]);
+  const [sportId, setSportId] = useState<string>("");
+  const [competitionId, setCompetitionId] = useState<string>("");
+  const [seasonId, setSeasonId] = useState<string>(""); // evento seleccionado en esta pantalla
+  const [activeSeasonLabel, setActiveSeasonLabel] = useState<string>("");
+
+  const [allLeagues, setAllLeagues] = useState<ApiLeague[]>([]);
+  const [leagueId, setLeagueId] = useState<string>(""); // opcional (mis ligas para ese evento)
+
+  const leaguesForSeason = useMemo(() => {
+    if (!seasonId) return [];
+    return (allLeagues ?? []).filter((l) => l.seasonId === seasonId);
+  }, [allLeagues, seasonId]);
+
 
   const [editing, setEditing] = useState<ApiScoringRule | null>(null);
   const [saving, setSaving] = useState(false);
@@ -52,7 +98,7 @@ export default function AdminRulesPage() {
     return token;
   }
 
-  async function loadAll() {
+  async function loadAll(nextSeasonId?: string) {
     const token = getTokenOrRedirect();
     if (!token) return;
 
@@ -60,17 +106,64 @@ export default function AdminRulesPage() {
     setError(null);
 
     try {
+      // 1) Me (validar admin + fallback de activeSeasonId)
       const u = await me(token, locale);
+      setUser(u);
+
       if (u?.role !== "ADMIN") {
         router.replace(`/${locale}/dashboard`);
         return;
       }
 
-      const list = await listScoringRules(token);
+      // 2) Catálogo (para cascada)
+      const cat = await getCatalog(locale);
+      setCatalog(cat);
+
+      // 3) SeasonId efectivo
+      // Regla CLAVE: si nextSeasonId viene explícito (aunque sea ""), NO usamos fallbacks.
+      // Esto evita que al cambiar Deporte/Competición vuelva a pisar con u.activeSeasonId.
+      const lsSeasonId = localStorage.getItem("admin_ctx_seasonId") ?? "";
+      const sid =
+        nextSeasonId !== undefined
+          ? nextSeasonId
+          : (lsSeasonId || (u.activeSeasonId ?? "") || "");
+
+      setSeasonId(sid);
+
+      if (sid) {
+        localStorage.setItem("admin_ctx_seasonId", sid);
+
+        const inferred = inferSportCompetitionFromSeason(cat, sid);
+        setSportId(inferred.sportId);
+        setCompetitionId(inferred.competitionId);
+
+        // Label desde catálogo (más estable que depender de u.activeSeason)
+        setActiveSeasonLabel(findSeasonName(cat, sid));
+      } else {
+        // Importante: si no hay evento seleccionado, NO tocamos sportId/competitionId
+        // porque el usuario puede estar seleccionándolos manualmente en la cascada.
+        setActiveSeasonLabel("");
+      }
+
+
+      // 4) Mis ligas (para combo Liga)
+      try {
+        const mine = await getMyLeagues(token);
+        setAllLeagues(mine);
+
+        const lsLeagueId = localStorage.getItem("admin_ctx_leagueId") ?? "";
+        const ok = sid ? mine.some((l) => l.id === lsLeagueId && l.seasonId === sid) : false;
+        setLeagueId(ok ? lsLeagueId : "");
+      } catch {
+        setAllLeagues([]);
+        setLeagueId("");
+      }
+
+      // 5) Reglas por Season (si hay sid, se lo pasamos)
+      const list = await listScoringRules(token, sid || undefined);
       setRules(list);
 
-      const hasB01 = list.some((r) => r.id === "B01");
-      setSelectedId(hasB01 ? "B01" : (list[0]?.id ?? "B01"));
+      setSelectedId(list[0]?.id ?? "");
     } catch (e: any) {
       setError(e?.message ?? "Error");
     } finally {
@@ -159,7 +252,7 @@ export default function AdminRulesPage() {
     setError(null);
 
     try {
-      const res = await recomputeScoring(token);
+      const res = await recomputeScoring(token, seasonId || undefined);
       setMsg(
         `✅ Recalculo listo. Matches confirmados: ${res.confirmedMatchesWithScore} · Picks procesados: ${res.picksProcessed}`,
       );
@@ -181,6 +274,11 @@ export default function AdminRulesPage() {
       return;
     }
 
+    if (SYSTEM_RULE_IDS.has(id)) {
+      setError(`El ID "${id}" está reservado para reglas del sistema. Usa otro (ej: C01, M01, X01).`);
+      return;
+    }
+
     setCreating(true);
     setMsg(null);
     setError(null);
@@ -190,7 +288,7 @@ export default function AdminRulesPage() {
         id,
         name,
         description: newDesc.trim() ? newDesc.trim() : null,
-        isGlobal: id === "B01",
+        isGlobal: false,
         details: DEFAULT_CODES.map((x) => ({ code: x.code, points: 0 })),
       });
 
@@ -208,10 +306,12 @@ export default function AdminRulesPage() {
     }
   }
 
-  const baselineHint =
-    editing?.id === "B01"
-      ? "B01 = Básica Standard. Se usa para Ranking Mundial/País (baseline global)."
-      : "Esta regla se puede asignar a ligas (scoringRuleId). El baseline global sigue siendo B01.";
+  const isSystemRule = editing?.id ? SYSTEM_RULE_IDS.has(editing.id) : false;
+  const canEditPoints = !!editing && !isSystemRule;
+
+  const baselineHint = isSystemRule
+    ? "Regla predefinida del sistema (solo lectura)."
+    : "Esta regla puede asignarse a ligas (League.scoringRuleId) para el Ranking de Liga. Los rankings Mundial/País usan la regla estándar del Evento (Season.defaultScoringRuleId).";
 
   return (
     <div style={{ maxWidth: 980, margin: "40px auto", padding: 16 }}>
@@ -249,6 +349,146 @@ export default function AdminRulesPage() {
           {msg}
         </div>
       ) : null}
+
+
+      {/* Contexto (Deporte → Competición → Evento → Liga) */}
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="text-xs uppercase tracking-wider text-white/60">Contexto</div>
+
+        <div className="mt-1 text-sm text-white/80">
+          Evento activo:{" "}
+          <span className="font-semibold text-white">{activeSeasonLabel || (seasonId ? seasonId : "—")}</span>
+        </div>
+
+        <div className="mt-4 grid gap-3 max-w-xl">
+          {/* Deporte */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-white/60">Deporte</label>
+            <select
+              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              value={sportId}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSportId(next);
+                setCompetitionId("");
+                setSeasonId("");
+                setActiveSeasonLabel("");
+                localStorage.removeItem("admin_ctx_seasonId");
+
+                setLeagueId("");
+                localStorage.removeItem("admin_ctx_leagueId");
+
+                // No recargamos todavía: las reglas se recargan al escoger Evento (seasonId)
+                setRules([]);
+              }}
+            >
+              <option value="">Seleccionar</option>
+              {catalog.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Competición */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-white/60">Competición</label>
+            <select
+              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              value={competitionId}
+              onChange={(e) => {
+                const next = e.target.value;
+                setCompetitionId(next);
+                setSeasonId("");
+                setActiveSeasonLabel("");
+                localStorage.removeItem("admin_ctx_seasonId");
+
+                setLeagueId("");
+                localStorage.removeItem("admin_ctx_leagueId");
+
+                // No recargamos todavía: las reglas se recargan al escoger Evento (seasonId)
+                setRules([]);
+              }}
+              disabled={!sportId}
+            >
+              <option value="">Seleccionar</option>
+              {(catalog.find((s) => s.id === sportId)?.competitions ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Evento */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-white/60">Evento</label>
+            <select
+              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              value={seasonId}
+              onChange={(e) => {
+                const next = e.target.value || "";
+                setSeasonId(next);
+                if (next) {
+                  localStorage.setItem("admin_ctx_seasonId", next);
+                  setActiveSeasonLabel(findSeasonName(catalog, next));
+                } else {
+                  localStorage.removeItem("admin_ctx_seasonId");
+                  setActiveSeasonLabel("");
+                }
+
+                // liga depende de evento
+                setLeagueId("");
+                localStorage.removeItem("admin_ctx_leagueId");
+
+                // recarga reglas por evento
+                loadAll(next);
+              }}
+              disabled={!sportId || !competitionId}
+            >
+              <option value="">Seleccionar</option>
+              {(
+                catalog
+                  .find((s) => s.id === sportId)
+                  ?.competitions?.find((c) => c.id === competitionId)
+                  ?.seasons ?? []
+              ).map((se) => (
+                <option key={se.id} value={se.id}>
+                  {se.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Liga (opcional) */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-white/60">Liga (opcional)</label>
+            <select
+              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              value={leagueId}
+              onChange={(e) => {
+                const next = e.target.value || "";
+                setLeagueId(next);
+                if (next) localStorage.setItem("admin_ctx_leagueId", next);
+                else localStorage.removeItem("admin_ctx_leagueId");
+              }}
+              disabled={!seasonId}
+            >
+              <option value="">Seleccionar</option>
+              {leaguesForSeason.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+
+            {!!seasonId && leaguesForSeason.length === 0 && (
+              <div className="text-xs text-white/50 mt-1">No tienes ligas para este evento (o aún no cargaron).</div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-[320px_1fr]">
         {/* LEFT */}
@@ -323,7 +563,7 @@ export default function AdminRulesPage() {
                 <button
                   type="button"
                   onClick={onSave}
-                  disabled={saving}
+                  disabled={saving || !canEditPoints}
                   className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
                 >
                   {saving ? "Guardando…" : "Guardar"}
@@ -336,6 +576,7 @@ export default function AdminRulesPage() {
                   <input
                     value={editing.name}
                     onChange={(e) => setEditing((p) => (p ? { ...p, name: e.target.value } : p))}
+                    disabled={isSystemRule}
                     className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
                   />
                 </div>
@@ -352,6 +593,12 @@ export default function AdminRulesPage() {
 
               <div className="pt-2 border-t border-zinc-800">
                 <div className="font-semibold mb-2">Puntos</div>
+
+                {!canEditPoints ? (
+                  <div className="text-xs opacity-70 mb-2">
+                    Esta es una regla predefinida del sistema. Solo se puede visualizar. Para modificar puntos, crea una regla personalizada.
+                  </div>
+                ) : null}
 
                 <div className="grid gap-3 md:grid-cols-2">
                   {DEFAULT_CODES.map((x) => {
@@ -370,19 +617,19 @@ export default function AdminRulesPage() {
                           type="number"
                           value={curr}
                           onChange={(e) => setDetail(x.code, Number(e.target.value))}
-                          className="w-24 px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm"
+                          disabled={!canEditPoints}
+                          className="w-24 px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                         />
+
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              {editing.id === "B01" ? (
-                <div className="text-xs opacity-70">
-                  Nota: B01 se recalcula en paralelo siempre (baseline). Rankings Mundial/País usan B01.
-                </div>
-              ) : null}
+              <div className="text-xs opacity-70">
+                Nota: El Ranking de Liga usa la regla configurada en la liga. Los rankings Mundial/País usan la regla estándar del Evento (Season.defaultScoringRuleId).
+              </div>
             </>
           )}
         </div>

@@ -18,6 +18,12 @@ enum MemberStatus {
   PENDING
 }
 
+enum LeagueMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
 enum MatchStatus {
   SCHEDULED
   LIVE
@@ -29,6 +35,11 @@ enum PickStatus {
   VALID
   LATE
   VOID
+}
+
+enum MatchAdvanceMethod {
+  ET // Prórroga
+  PEN // Penales
 }
 
 model User {
@@ -48,7 +59,7 @@ model User {
   leaguesCreated League[]
   memberships    LeagueMember[]
   picks          Pick[]
-  countryCode String? // ej: "VE", "US", "MX"
+  countryCode    String? // ej: "VE", "US", "MX"
 }
 
 model Sport {
@@ -90,18 +101,29 @@ model CompetitionTranslation {
 }
 
 model Season {
-  id            String              @id @default(uuid())
-  competitionId String
-  slug          String              @unique
-  startDate     DateTime?
-  endDate       DateTime?
-  translations  SeasonTranslation[]
-  competition   Competition         @relation(fields: [competitionId], references: [id])
-  leagues       League[]
-  teams         Team[]
-  matches       Match[]
+  id                   String                 @id @default(uuid())
+  competitionId        String
+  slug                 String                 @unique
+  startDate            DateTime?
+  endDate              DateTime?
+  translations         SeasonTranslation[]
+  competition          Competition            @relation(fields: [competitionId], references: [id])
+  // 🔽 NUEVO — regla standard por evento (Season)
+  defaultScoringRuleId String?
+  defaultScoringRule   ScoringRule?           @relation("SeasonDefaultRule", fields: [defaultScoringRuleId], references: [id])
+  // 🔽 NUEVO — reglas disponibles para este evento (Season)
+  scoringRules         ScoringRule[]
+  // 🔽 NUEVO — conceptos permitidos para este evento (Season)
+  scoringConcepts      SeasonScoringConcept[]
+  leagues              League[]
+  teams                Team[]
+  matches              Match[]
   // 🔽 NUEVO — usuarios que tienen esta season activa
-  activeUsers   User[]
+  activeUsers          User[]
+  // 🔽 Admin (fase de grupos)
+  groupStandings       GroupStanding[]
+  thirdPlaceRankings   ThirdPlaceRanking[]
+  bracketSlots         BracketSlot[]
 }
 
 model SeasonTranslation {
@@ -132,11 +154,12 @@ model League {
 }
 
 model LeagueMember {
-  id       String       @id @default(uuid())
+  id       String           @id @default(uuid())
   leagueId String
   userId   String
-  status   MemberStatus @default(ACTIVE)
-  joinedAt DateTime     @default(now())
+  status   MemberStatus     @default(ACTIVE)
+  role     LeagueMemberRole @default(MEMBER)
+  joinedAt DateTime         @default(now())
 
   league League @relation(fields: [leagueId], references: [id])
   user   User   @relation(fields: [userId], references: [id])
@@ -160,8 +183,12 @@ model Team {
 
   translations TeamTranslation[]
 
-  homeMatches Match[] @relation("HomeTeam")
-  awayMatches Match[] @relation("AwayTeam")
+  homeMatches        Match[]             @relation("HomeTeam")
+  awayMatches        Match[]             @relation("AwayTeam")
+  // 🔽 Admin (fase de grupos)
+  groupStandings     GroupStanding[]
+  thirdPlaceRankings ThirdPlaceRanking[]
+  bracketSlots       BracketSlot[]
 
   @@unique([seasonId, externalId])
 }
@@ -199,6 +226,10 @@ model Match {
   homeScore  Int?
   awayScore  Int?
 
+  // KO: quién avanza (solo aplica en fases KO cuando hay empate real)
+  advanceTeamId String?
+  advanceMethod MatchAdvanceMethod?
+
   season   Season @relation(fields: [seasonId], references: [id])
   homeTeam Team   @relation("HomeTeam", fields: [homeTeamId], references: [id])
   awayTeam Team   @relation("AwayTeam", fields: [awayTeamId], references: [id])
@@ -222,6 +253,9 @@ model Pick {
   awayPred Int
   status   PickStatus @default(VALID)
 
+  // KO: desempate del usuario cuando pronostica empate en fases KO
+  koWinnerTeamId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -242,9 +276,14 @@ model ScoringRule {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  details    ScoringRuleDetail[]
-  leagues    League[]
-  pickScores PickScore[]
+  details          ScoringRuleDetail[]
+  leagues          League[]
+  pickScores       PickScore[]
+  // 🔽 NUEVO — la regla pertenece a un evento (Season)
+  seasonId         String?
+  season           Season?             @relation(fields: [seasonId], references: [id])
+  // 🔽 NUEVO — seasons donde esta regla es la “standard”
+  seasonsAsDefault Season[]            @relation("SeasonDefaultRule")
 }
 
 model ScoringRuleDetail {
@@ -269,4 +308,117 @@ model PickScore {
   points Int
 
   @@unique([pickId, ruleId])
+}
+
+// ===== Admin: Standings por grupo (fase F01) =====
+model GroupStanding {
+  id        String @id @default(cuid())
+  seasonId  String
+  groupCode String // "A".."L"
+  teamId    String
+
+  played Int @default(0)
+  won    Int @default(0)
+  drawn  Int @default(0)
+  lost   Int @default(0)
+  gf     Int @default(0)
+  ga     Int @default(0)
+  gd     Int @default(0)
+  points Int @default(0)
+
+  // Posición final del grupo (1..4). Si no se puede decidir, queda null y needsManual=true
+  posGroup    Int?
+  needsManual Boolean @default(false)
+
+  // Override manual (cuando el admin fuerza el orden por igualdad total)
+  manualOverride Boolean @default(false)
+  manualReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  @@unique([seasonId, groupCode, teamId])
+  @@index([seasonId, groupCode])
+}
+
+// ===== Admin: Ranking de terceros (snapshot + override manual) =====
+model ThirdPlaceRanking {
+  id        String @id @default(cuid())
+  seasonId  String
+  teamId    String
+  groupCode String
+
+  points Int
+  gd     Int
+  gf     Int
+  ga     Int
+
+  rankGlobal  Int?
+  isQualified Boolean @default(false)
+
+  // Si el corte top8 queda ambiguo por igualdad total, needsManual=true
+  needsManual    Boolean @default(false)
+  manualOverride Boolean @default(false)
+  manualReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  @@unique([seasonId, teamId])
+  @@index([seasonId])
+}
+
+// ===== Admin: Slots de 16avos (R32) =====
+enum BracketRound {
+  R32
+}
+
+enum BracketSlotType {
+  HOME
+  AWAY
+}
+
+model BracketSlot {
+  id       String          @id @default(cuid())
+  seasonId String
+  round    BracketRound    @default(R32)
+  matchNo  Int // 1..16
+  slot     BracketSlotType
+
+  // Placeholder textual tipo "1º Grupo A", "2º Grupo B", "3º Grupo A/B/C/D"
+  placeholderText String?
+
+  // Equipo real asignado
+  teamId String?
+
+  needsManual    Boolean @default(false)
+  manualOverride Boolean @default(false)
+  manualReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id])
+  team   Team?  @relation(fields: [teamId], references: [id])
+
+  @@unique([seasonId, round, matchNo, slot])
+  @@index([seasonId, round])
+}
+
+model SeasonScoringConcept {
+  id       String  @id @default(cuid())
+  seasonId String
+  code     String // "EXACTO", "RESULTADO", "HITS", etc.
+  label    String? // opcional: para UI si quieres algo human-readable por evento
+
+  season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([seasonId, code])
+  @@index([seasonId])
 }

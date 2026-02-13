@@ -5,7 +5,7 @@ import { LeaderboardsService } from './leaderboards.service';
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class LeaderboardsController {
-  constructor(private readonly lbs: LeaderboardsService) {}
+  constructor(private readonly lbs: LeaderboardsService) { }
 
   // Ranking de una liga (regla de la liga)
   @Get('leagues/:leagueId/leaderboard')
@@ -26,10 +26,12 @@ export class LeaderboardsController {
   async world(
     @Req() req: any,
     @Query('limit') limit?: string,
+    @Query('seasonId') seasonId?: string,
   ) {
     return this.lbs.worldLeaderboard({
       viewerUserId: req.user.id,
       limit: limit ? Number(limit) : 50,
+      seasonId: seasonId || undefined,
     });
   }
 
@@ -39,11 +41,13 @@ export class LeaderboardsController {
     @Req() req: any,
     @Param('countryCode') countryCode: string,
     @Query('limit') limit?: string,
+    @Query('seasonId') seasonId?: string,
   ) {
     return this.lbs.countryLeaderboard({
       countryCode: countryCode.toUpperCase(),
       viewerUserId: req.user.id,
       limit: limit ? Number(limit) : 50,
+      seasonId: seasonId || undefined,
     });
   }
 }

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Patch,
   Post,
   Query,
   Req,
@@ -13,7 +14,7 @@ import { JwtAuthGuard } from './jwt.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService) { }
 
   @Post('register')
   register(@Body() body: { email: string; password: string; displayName: string }) {
@@ -30,5 +31,11 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@Req() req: any, @Query('locale') locale = 'es') {
     return this.auth.me(req.user.userId, locale);
+  }
+
+  @Patch('active-season')
+  @UseGuards(JwtAuthGuard)
+  setActiveSeason(@Req() req: any, @Body() body: { seasonId: string }) {
+    return this.auth.setActiveSeason(req.user.userId, body.seasonId);
   }
 }

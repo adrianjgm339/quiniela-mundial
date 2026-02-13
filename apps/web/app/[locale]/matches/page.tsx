@@ -1,30 +1,68 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import AiChatWidget from '../../components/AiChatWidget';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import {
+  getCatalog,
   getMatches,
   getMyLeagues,
   listPicks,
+  setActiveSeason,
   upsertPick,
+  type ApiLeague,
   type ApiMatch,
   type ApiPick,
-  type ApiLeague,
+  type CatalogSport,
 } from '@/lib/api';
+import AiChatWidget from '../../components/AiChatWidget';
 
 export default function MatchesPage() {
   const router = useRouter();
   const { locale } = useParams<{ locale: string }>();
+  const searchParams = useSearchParams();
+  const appliedLeaguesContextRef = useRef(false);
 
+  const [token, setToken] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  const searchParams = useSearchParams();
   const phase = searchParams.get('phase') || '';
   const group = searchParams.get('group') || '';
 
+  const [catalog, setCatalog] = useState<CatalogSport[]>([]);
+  const [sportId, setSportId] = useState('');
+  const [competitionId, setCompetitionId] = useState('');
+  const [seasonId, setSeasonId] = useState('');
+
+  const [leagues, setLeagues] = useState<ApiLeague[]>([]);
+  const [leagueId, setLeagueId] = useState<string | null>(null);
+  const [leagueConfirmed, setLeagueConfirmed] = useState(false);
+
+  const [allItems, setAllItems] = useState<ApiMatch[]>([]);
+  const [items, setItems] = useState<ApiMatch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [picksByMatchId, setPicksByMatchId] = useState<Record<string, ApiPick>>({});
+  const [picksLeagueId, setPicksLeagueId] = useState<string | null>(null);
+  const [loadingPicks, setLoadingPicks] = useState(false);
+
+  // modal
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<ApiMatch | null>(null);
+  const [homePred, setHomePred] = useState<string>('');
+  const [awayPred, setAwayPred] = useState<string>('');
+  const [koWinnerTeamId, setKoWinnerTeamId] = useState<string>('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
-    // Si ya viene phase/group en URL, no tocamos nada
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Persist phase/group si NO vienen en URL
+  useEffect(() => {
     const hasPhaseInUrl = searchParams.has('phase');
     const hasGroupInUrl = searchParams.has('group');
     if (hasPhaseInUrl || hasGroupInUrl) return;
@@ -32,78 +70,91 @@ export default function MatchesPage() {
     const savedPhase = localStorage.getItem('matchesPhase') || '';
     const savedGroup = localStorage.getItem('matchesGroup') || '';
 
-    const next = new URLSearchParams(searchParams.toString());
-    if (savedPhase) next.set('phase', savedPhase);
-    if (savedGroup) next.set('group', savedGroup);
+    const params = new URLSearchParams(searchParams.toString());
+    if (savedPhase) params.set('phase', savedPhase);
+    if (savedGroup) params.set('group', savedGroup);
 
-    router.replace(`/${locale}/matches?${next.toString()}`);
+    const qs = params.toString();
+    router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
+  function parseTs(iso?: string | null) {
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? t : null;
+  }
 
-  const [items, setItems] = useState<ApiMatch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  function getCloseTs(m: any) {
+    const close = parseTs(m.closeUtc);
+    if (close) return close;
 
-  const [leagueId, setLeagueId] = useState<string | null>(null);
-  const [picksByMatchId, setPicksByMatchId] = useState<Record<string, ApiPick>>({});
+    const start = parseTs(m.utcDateTime ?? m.timeUtc ?? m.kickoffUtc);
+    const mins = typeof m.closeMinutes === 'number' ? m.closeMinutes : null;
+    if (start && mins != null) return start - mins * 60_000;
 
-  const [token, setToken] = useState<string | null>(null);
-  const [leagues, setLeagues] = useState<ApiLeague[]>([]);
-  const [loadingPicks, setLoadingPicks] = useState(false);
-
-  // modal state
-  const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<ApiMatch | null>(null);
-  const [homePred, setHomePred] = useState<number>(0);
-  const [awayPred, setAwayPred] = useState<number>(0);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+    return null;
+  }
 
   function isLocked(m: ApiMatch) {
-    if (m.resultConfirmed) return true;
-    const close = m.closeUtc ? new Date(m.closeUtc).getTime() : null;
-    return close ? now >= close : false;
+    if ((m as any).resultConfirmed) return true;
+    const closeTs = getCloseTs(m);
+    return closeTs ? now >= closeTs : false;
   }
 
-  function fmtUtc(dt: string) {
-    const d = new Date(dt);
-    return d.toLocaleString(locale.startsWith('es') ? 'es-ES' : 'en-US', {
-      timeZone: 'UTC',
-      year: 'numeric',
-      month: '2-digit',
+  function formatLocalDateTime(localeStr: string, utcIso?: string | null) {
+    const ts = parseTs(utcIso);
+    if (!ts) return '';
+    const d = new Date(ts);
+
+    const date = new Intl.DateTimeFormat(localeStr, {
+      weekday: 'short',
       day: '2-digit',
+      month: 'short',
+    }).format(d);
+
+    const time = new Intl.DateTimeFormat(localeStr, {
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false,
-    });
+    }).format(d);
+
+    return `${date} · ${time}`;
   }
 
-  function fmtClose(dt: string | null) {
-    if (!dt) return '—';
-    const d = new Date(dt);
-    return d.toLocaleString(locale.startsWith('es') ? 'es-ES' : 'en-US', {
-      timeZone: 'UTC',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
+  function formatCountdown(ms: number) {
+    const totalMin = Math.floor(ms / 60_000);
+    if (totalMin <= 0) return '0m';
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h <= 0) return `${m}m`;
+    return `${h}h ${String(m).padStart(2, '0')}m`;
   }
 
-  function minsLeft(dt: string | null) {
-    if (!dt) return null;
-    const ms = new Date(dt).getTime() - now;
-    if (ms <= 0) return 0;
-    return Math.floor(ms / 60_000);
-  }
+  const competitionOptions = useMemo(() => {
+    const s = catalog.find((x) => x.id === sportId);
+    return s?.competitions ?? [];
+  }, [catalog, sportId]);
 
-  // Cargar matches + ligas
+  const seasonOptions = useMemo(() => {
+    const c = competitionOptions.find((x) => x.id === competitionId);
+    return c?.seasons ?? [];
+  }, [competitionOptions, competitionId]);
+
+  const visibleLeagues = useMemo(() => {
+    if (!seasonId) return [];
+    return leagues.filter((l: any) => l.seasonId === seasonId);
+  }, [leagues, seasonId]);
+
+  const effectiveLeagueId = useMemo(() => {
+    if (!leagueConfirmed) return null;
+    if (!leagueId) return null;
+    if (!seasonId) return null;
+    const l = leagues.find((x) => x.id === leagueId) as any;
+    if (!l) return null;
+    return l.seasonId === seasonId ? leagueId : null;
+  }, [leagueConfirmed, leagueId, seasonId, leagues]);
+
+  // bootstrap (catalog + myLeagues + restore ctx)
   useEffect(() => {
     const t = localStorage.getItem('token');
     if (!t) {
@@ -118,86 +169,305 @@ export default function MatchesPage() {
         setLoading(true);
         setError(null);
 
-        const [data, myLeagues] = await Promise.all([
-          getMatches(t, locale, {
-            phaseCode: phase || undefined,
-            groupCode: group || undefined,
-          }),
-          getMyLeagues(t),
-        ]);
+        const cat = await getCatalog(locale);
+        setCatalog(cat);
 
-        setItems(data);
+        const myLeagues = await getMyLeagues(t);
         setLeagues(myLeagues);
 
-        // determinar liga activa válida
-        let lid = localStorage.getItem('activeLeagueId');
-        const exists = lid && myLeagues.some((l) => l.id === lid);
+        const fromLeagues = localStorage.getItem('matches_ctx_fromLeagues') === '1';
 
-        if (!exists) {
-          lid = myLeagues[0]?.id ?? null;
-          if (!lid) {
-            router.push(`/${locale}/leagues`);
-            return;
+        if (fromLeagues && !appliedLeaguesContextRef.current) {
+          const sId = localStorage.getItem('matches_ctx_sportId') || '';
+          const cId = localStorage.getItem('matches_ctx_competitionId') || '';
+          const season = localStorage.getItem('matches_ctx_seasonId') || '';
+          const lId = localStorage.getItem('matches_ctx_leagueId') || '';
+
+          setSportId(sId);
+          setCompetitionId(cId);
+          setSeasonId(season);
+
+          const leagueOk = myLeagues.some((l: any) => l.id === lId && l.seasonId === season);
+
+          if (leagueOk) {
+            setLeagueId(lId);
+            setLeagueConfirmed(true);
+            localStorage.setItem('activeLeagueId', lId);
+          } else {
+            setLeagueId(null);
+            setLeagueConfirmed(false);
+            localStorage.removeItem('activeLeagueId');
           }
-          localStorage.setItem('activeLeagueId', lid);
+
+          if (season) localStorage.setItem('activeSeasonId', season);
+
+          localStorage.removeItem('matches_ctx_fromLeagues');
+          appliedLeaguesContextRef.current = true;
+        } else if (!appliedLeaguesContextRef.current) {
+          // entrada limpia
+          setSportId('');
+          setCompetitionId('');
+          setSeasonId('');
+          localStorage.removeItem('activeSeasonId');
+          localStorage.removeItem('activeLeagueId');
+          setLeagueId(null);
+          setLeagueConfirmed(false);
         }
 
-        setLeagueId(lid);
+        setAllItems([]);
+        setItems([]);
+        setPicksByMatchId({});
+        setLoadingPicks(false);
       } catch (e: any) {
-        setError(e?.message ?? 'Error cargando datos');
+        setError(e?.message ?? 'Error cargando');
       } finally {
         setLoading(false);
       }
     })();
-  }, [locale, phase, group, router]);
+  }, [locale, router]);
 
-  // cargar picks cuando haya token + leagueId + matches
+  // al cambiar seasonId: setActiveSeason + cargar matches + elegir liga por UX
   useEffect(() => {
-    if (!token || !leagueId || items.length === 0) return;
+    if (!token) return;
+    if (!seasonId) return;
+
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // reset filtros (evita filtros colgados entre eventos)
+        localStorage.setItem('matchesPhase', '');
+        localStorage.setItem('matchesGroup', '');
+        router.replace(`/${locale}/matches`);
+
+        await setActiveSeason(token, seasonId);
+
+        const leaguesInSeason = leagues.filter((l: any) => l.seasonId === seasonId);
+
+        const keepRestoredLeague =
+          appliedLeaguesContextRef.current && leagueConfirmed && leagueId && leaguesInSeason.some((l) => l.id === leagueId);
+
+        let nextLeagueId: string | null = null;
+
+        if (keepRestoredLeague) {
+          nextLeagueId = leagueId!;
+        } else {
+          if (leaguesInSeason.length === 1) {
+            nextLeagueId = leaguesInSeason[0].id;
+          } else {
+            nextLeagueId = null;
+            localStorage.removeItem('activeLeagueId');
+          }
+
+          setLeagueId(nextLeagueId);
+          setLeagueConfirmed(!!nextLeagueId);
+        }
+
+        if (nextLeagueId) localStorage.setItem('activeLeagueId', nextLeagueId);
+        else if (!keepRestoredLeague) localStorage.removeItem('activeLeagueId');
+
+        // limpiar picks visibles
+        setPicksByMatchId({});
+        setPicksLeagueId(null);
+
+        const all = await getMatches(token, locale, { seasonId });
+        setAllItems(all);
+
+        const data = await getMatches(token, locale, { seasonId, phaseCode: undefined, groupCode: undefined });
+        setItems(data);
+      } catch (e: any) {
+        setError(e?.message ?? 'Error cargando partidos');
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasonId]);
+
+  // refetch de partidos por filtros
+  useEffect(() => {
+    if (!token) return;
+    if (!seasonId) return;
+
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const data = await getMatches(token, locale, {
+          seasonId,
+          phaseCode: phase || undefined,
+          groupCode: group || undefined,
+        });
+
+        setItems(data);
+      } catch (e: any) {
+        setError(e?.message ?? 'Error aplicando filtros');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [token, seasonId, locale, phase, group]);
+
+  // cargar picks por liga efectiva
+  useEffect(() => {
+    if (!token) return;
+
+    if (!effectiveLeagueId) {
+      setPicksByMatchId({});
+      setPicksLeagueId(null);
+      setLoadingPicks(false);
+      return;
+    }
+
+    let cancelled = false;
+    const requestedLeagueId = effectiveLeagueId;
 
     (async () => {
       try {
         setLoadingPicks(true);
-        const picks = await listPicks(token, leagueId);
+        setPicksByMatchId({});
+        setPicksLeagueId(null);
+
+        const picks = await listPicks(token, requestedLeagueId);
+
+        if (cancelled) return;
+
+        const onlyThisLeague = (Array.isArray(picks) ? picks : []).filter(
+          (p: ApiPick) => (p as any).leagueId === requestedLeagueId
+        );
+
         const map: Record<string, ApiPick> = {};
-        for (const p of picks) map[p.matchId] = p;
+        for (const p of onlyThisLeague) map[(p as any).matchId] = p;
+
+        setPicksLeagueId(requestedLeagueId);
         setPicksByMatchId(map);
-      } catch {
-        // silencioso
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? 'Error cargando picks');
       } finally {
-        setLoadingPicks(false);
+        if (!cancelled) setLoadingPicks(false);
       }
     })();
-  }, [token, leagueId, items.length]);
 
-  function openPickModal(m: ApiMatch) {
-    setSelected(m);
-    setOpen(true);
+    return () => {
+      cancelled = true;
+    };
+  }, [token, effectiveLeagueId]);
+
+  const phaseOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of allItems) {
+      const pc = (m as any).phaseCode as string | undefined;
+      if (pc) set.add(pc);
+    }
+    return Array.from(set.values()).sort();
+  }, [allItems]);
+
+  const allGroupOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of allItems) {
+      const gc = (m as any).groupCode as string | undefined;
+      if (gc) set.add(gc);
+    }
+    return Array.from(set.values()).sort();
+  }, [allItems]);
+
+  const groupOptions = useMemo(() => {
+    const base = phase ? allItems.filter((m) => ((m as any).phaseCode as string | undefined) === phase) : allItems;
+    const set = new Set<string>();
+    for (const m of base) {
+      const gc = (m as any).groupCode as string | undefined;
+      if (gc) set.add(gc);
+    }
+    return Array.from(set.values()).sort();
+  }, [allItems, phase]);
+
+  const showPhaseGroupFilters = phaseOptions.length > 0 || allGroupOptions.length > 0;
+
+  useEffect(() => {
+    if (!group) return;
+    if (groupOptions.includes(group)) return;
+
+    localStorage.setItem('matchesGroup', '');
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('group');
+    const qs = params.toString();
+    router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group, groupOptions, locale]);
+
+  function onChangeLeague(newLeagueId: string) {
+    setLeagueId(newLeagueId);
+    setLeagueConfirmed(true);
+    localStorage.setItem('activeLeagueId', newLeagueId);
+
+    setPicksByMatchId({});
+    setPicksLeagueId(null);
     setSaveError(null);
+  }
 
-    const myPick = picksByMatchId[m.id];
-    setHomePred(myPick?.homePred ?? 0);
-    setAwayPred(myPick?.awayPred ?? 0);
+  function openPickModal(match: ApiMatch) {
+    setSaveError(null);
+    setSelected(match);
+
+    const existing = picksByMatchId[(match as any).id];
+    setHomePred(existing ? String((existing as any).homePred) : '');
+    setAwayPred(existing ? String((existing as any).awayPred) : '');
+    setKoWinnerTeamId((existing as any)?.koWinnerTeamId ?? '');
+
+    setOpen(true);
   }
 
   async function onSave() {
-    if (!token || !leagueId || !selected) return;
+    if (!token) {
+      router.push(`/${locale}/login`);
+      return;
+    }
+    if (!effectiveLeagueId) {
+      setSaveError('No hay Liga activa. Selecciona una liga primero.');
+      return;
+    }
+    if (!selected) return;
 
-    const locked = isLocked(selected);
-    if (locked) return;
+    const hpRaw = homePred.trim();
+    const apRaw = awayPred.trim();
+
+    const hp = hpRaw === '' ? null : Number(hpRaw);
+    const ap = apRaw === '' ? null : Number(apRaw);
+
+    if (hp === null || ap === null || !Number.isFinite(hp) || !Number.isFinite(ap)) {
+      setSaveError('Debes indicar el marcador (Local y Visitante).');
+      return;
+    }
+    if (hp < 0 || ap < 0) {
+      setSaveError('El marcador no puede ser negativo.');
+      return;
+    }
+
+    const isKO = (selected as any).phaseCode && (selected as any).phaseCode !== 'F01';
+    const isTie = hp === ap;
+
+    if (isKO && isTie && !koWinnerTeamId) {
+      setSaveError('KO: Como pronosticaste empate, debes indicar quién avanza (Local o Visitante).');
+      return;
+    }
+
+    const finalKoWinnerTeamId = isKO && isTie ? koWinnerTeamId : null;
 
     try {
       setSaving(true);
       setSaveError(null);
 
       const saved = await upsertPick(token, {
-        leagueId,
-        matchId: selected.id,
-        homePred,
-        awayPred,
+        leagueId: effectiveLeagueId,
+        matchId: (selected as any).id,
+        homePred: hp,
+        awayPred: ap,
+        koWinnerTeamId: finalKoWinnerTeamId,
       });
 
-      setPicksByMatchId((prev) => ({ ...prev, [selected.id]: saved }));
+      setPicksByMatchId((prev) => ({ ...prev, [(selected as any).id]: saved }));
       setOpen(false);
       setSelected(null);
     } catch (e: any) {
@@ -207,199 +477,413 @@ export default function MatchesPage() {
     }
   }
 
-  const activeLeague = leagueId ? leagues.find((l) => l.id === leagueId) : null;
-  const activeLeagueLabel = activeLeague
-    ? `${activeLeague.name} · Código: ${activeLeague.joinCode}`
-    : '—';
+  const activeLeague = effectiveLeagueId ? (leagues.find((l) => (l as any).id === effectiveLeagueId) as any) : null;
 
-  // ✅ ÚNICO aiContext (sin duplicados)
+  const activeLeagueLabel = activeLeague ? `${activeLeague.name} · Código: ${activeLeague.joinCode}` : '—';
+
   const aiContext = useMemo(() => {
-    const selectedPick = selected ? picksByMatchId[selected.id] : null;
+    const selectedPick = selected ? picksByMatchId[(selected as any).id] : null;
 
     return {
       page: 'matches',
       locale,
-      filters: { phase, group },
-      leagueId,
+      filters: { sportId, competitionId, seasonId, phase, group },
+      effectiveLeagueId,
       activeLeague: activeLeague
         ? { id: activeLeague.id, name: activeLeague.name, joinCode: activeLeague.joinCode }
         : null,
       selectedMatch: selected
         ? {
-            id: selected.id,
-            externalId: (selected as any).externalId ?? null,
+            id: (selected as any).id,
             phaseCode: (selected as any).phaseCode ?? null,
             groupCode: (selected as any).groupCode ?? null,
-            utcDateTime: (selected as any).utcDateTime ?? null,
+            utcDateTime: (selected as any).utcDateTime ?? (selected as any).timeUtc ?? null,
             closeUtc: (selected as any).closeUtc ?? null,
-            homeTeamName: (selected as any).homeTeamName ?? null,
-            awayTeamName: (selected as any).awayTeamName ?? null,
+            homeTeamName: (selected as any).homeTeam?.name ?? null,
+            awayTeamName: (selected as any).awayTeam?.name ?? null,
           }
         : null,
       selectedPick: selectedPick
-        ? { homePred: selectedPick.homePred, awayPred: selectedPick.awayPred, status: selectedPick.status }
+        ? {
+            homePred: (selectedPick as any).homePred,
+            awayPred: (selectedPick as any).awayPred,
+            koWinnerTeamId: (selectedPick as any).koWinnerTeamId ?? null,
+            status: (selectedPick as any).status ?? null,
+          }
         : null,
       nowUtc: new Date().toISOString(),
     };
-  }, [activeLeague, group, leagueId, locale, phase, picksByMatchId, selected]);
+  }, [
+    locale,
+    sportId,
+    competitionId,
+    seasonId,
+    phase,
+    group,
+    effectiveLeagueId,
+    activeLeague,
+    selected,
+    picksByMatchId,
+  ]);
 
-  const groupOptions = useMemo(() => {
-  const set = new Set<string>();
-  for (const m of items) {
-    const gc = ((m as any).groupCode ?? (m as any).group_code ?? '') as string;
-    if (gc) set.add(gc);
-  }
-  return Array.from(set).sort();
-}, [items]);
-
-
-  const phaseOptions = useMemo(() => {
-  const set = new Set<string>();
-  for (const m of items) {
-    const pc = ((m as any).phaseCode ?? (m as any).phase_code ?? '') as string;
-    if (pc) set.add(pc);
-  }
-  return Array.from(set).sort();
-}, [items]);
-
-
-  function onChangePhase(v: string) {
-    localStorage.setItem('matchesPhase', v);
-    const next = new URLSearchParams(searchParams.toString());
-    if (v) next.set('phase', v);
-    else next.delete('phase');
-
-    // si cambia phase, limpiamos group si no aplica
-    if (!v) {
-      localStorage.setItem('matchesGroup', '');
-      next.delete('group');
-    }
-
-    router.replace(`/${locale}/matches?${next.toString()}`);
-  }
-
-  function onChangeGroup(v: string) {
-    localStorage.setItem('matchesGroup', v);
-    const next = new URLSearchParams(searchParams.toString());
-    if (v) next.set('group', v);
-    else next.delete('group');
-    router.replace(`/${locale}/matches?${next.toString()}`);
-  }
+  const selectedLocked = selected ? isLocked(selected) : false;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold">Partidos</h1>
-            <div className="text-sm text-zinc-400">{activeLeagueLabel}</div>
+            <h1 className="text-xl font-semibold">Partidos</h1>
+            <div className="mt-1 text-sm text-zinc-400">
+              Liga activa: {activeLeagueLabel}
+              {effectiveLeagueId && loadingPicks ? ' · Cargando picks…' : ''}
+            </div>
           </div>
 
-          <button
-            onClick={() => router.push(`/${locale}/leagues`)}
-            className="rounded-lg bg-zinc-800 px-3 py-2 text-sm hover:bg-zinc-700"
-          >
-            Cambiar liga
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                localStorage.setItem('matchesPhase', '');
+                localStorage.setItem('matchesGroup', '');
+
+                setSportId('');
+                setCompetitionId('');
+                setSeasonId('');
+                setLeagueId(null);
+                setLeagueConfirmed(false);
+                setPicksLeagueId(null);
+
+                localStorage.removeItem('activeSeasonId');
+                localStorage.removeItem('activeLeagueId');
+
+                setPicksByMatchId({});
+                setItems([]);
+                setAllItems([]);
+                setError(null);
+
+                router.replace(`/${locale}/matches`);
+              }}
+              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
+              title="Quitar filtros"
+            >
+              Limpiar
+            </button>
+
+            <button
+              onClick={() => router.push(`/${locale}/leagues`)}
+              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
+              title="Gestionar ligas"
+            >
+              Ligas
+            </button>
+
+            <button
+              onClick={() => router.push(`/${locale}/dashboard`)}
+              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
+            >
+              Volver
+            </button>
+          </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 flex flex-wrap items-end gap-3">
-          <div>
-            <div className="text-xs text-zinc-400 mb-1">Fase</div>
-            <select
-              value={phase}
-              onChange={(e) => onChangePhase(e.target.value)}
-              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm ring-1 ring-zinc-800"
-            >
-              <option value="">Todas</option>
-              {phaseOptions.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* Cascada Sport → Competition → Event → League */}
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
+          <div className="grid grid-cols-1 gap-3">
+            <label className="text-sm text-zinc-300">
+              Deporte
+              <select
+                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                value={sportId}
+                onChange={(e) => {
+                  const v = e.target.value;
 
-          <div>
-            <div className="text-xs text-zinc-400 mb-1">Grupo</div>
-            <select
-              value={group}
-              onChange={(e) => onChangeGroup(e.target.value)}
-              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm ring-1 ring-zinc-800"
-            >
-              <option value="">Todos</option>
-              {groupOptions.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
+                  setSportId(v);
+                  setCompetitionId('');
+                  setSeasonId('');
+                  localStorage.removeItem('activeSeasonId');
+                  localStorage.removeItem('activeLeagueId');
 
-          {loadingPicks && <div className="text-xs text-zinc-400">Cargando picks…</div>}
+                  setLeagueId(null);
+                  setLeagueConfirmed(false);
+                  setPicksByMatchId({});
+                  setPicksLeagueId(null);
+                  setItems([]);
+                  setAllItems([]);
+                  setError(null);
+
+                  localStorage.setItem('matchesPhase', '');
+                  localStorage.setItem('matchesGroup', '');
+                  router.replace(`/${locale}/matches`);
+                }}
+              >
+                <option value="">Seleccionar deporte</option>
+                {catalog.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-sm text-zinc-300">
+              Competición
+              <select
+                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
+                value={competitionId}
+                disabled={!sportId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCompetitionId(v);
+                  setSeasonId('');
+                  localStorage.removeItem('activeSeasonId');
+                  localStorage.removeItem('activeLeagueId');
+
+                  setLeagueId(null);
+                  setLeagueConfirmed(false);
+                  setPicksByMatchId({});
+                  setPicksLeagueId(null);
+                  setItems([]);
+                  setAllItems([]);
+                  setError(null);
+
+                  localStorage.setItem('matchesPhase', '');
+                  localStorage.setItem('matchesGroup', '');
+                  router.replace(`/${locale}/matches`);
+                }}
+              >
+                <option value="">Seleccionar competición</option>
+                {competitionOptions.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-sm text-zinc-300">
+              Evento
+              <select
+                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
+                value={seasonId}
+                disabled={!competitionId}
+                onChange={(e) => {
+                  const v = e.target.value;
+
+                  setSeasonId(v);
+                  if (v) localStorage.setItem('activeSeasonId', v);
+                  else localStorage.removeItem('activeSeasonId');
+
+                  setLeagueId(null);
+                  setLeagueConfirmed(false);
+                  localStorage.removeItem('activeLeagueId');
+                  setPicksByMatchId({});
+                  setPicksLeagueId(null);
+                  setLoadingPicks(false);
+                  setItems([]);
+                  setAllItems([]);
+                  setError(null);
+
+                  localStorage.setItem('matchesPhase', '');
+                  localStorage.setItem('matchesGroup', '');
+                  router.replace(`/${locale}/matches`);
+                }}
+              >
+                <option value="">Seleccionar evento</option>
+                {seasonOptions.map((s: any) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-sm text-zinc-300">
+              Liga
+              <select
+                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
+                value={effectiveLeagueId ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) {
+                    setLeagueId(null);
+                    setLeagueConfirmed(false);
+                    localStorage.removeItem('activeLeagueId');
+                    setPicksByMatchId({});
+                    setPicksLeagueId(null);
+                    setSaveError(null);
+                    return;
+                  }
+                  onChangeLeague(v);
+                }}
+                disabled={!seasonId || visibleLeagues.length === 0}
+                title="Selecciona la liga para la cual estás pronosticando"
+              >
+                {!seasonId && <option value="">Selecciona evento primero</option>}
+                {seasonId && visibleLeagues.length === 0 && <option value="">Sin ligas en este evento</option>}
+                {seasonId && visibleLeagues.length > 1 && <option value="">Seleccionar</option>}
+                {seasonId &&
+                  visibleLeagues.map((l: any) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} ({l.joinCode})
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
         </div>
 
-        {error && (
-          <div className="rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-200">
-            {error}
+        {showPhaseGroupFilters && (
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm text-zinc-300">
+              Fase
+              <select
+                className="rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                value={phase}
+                onChange={(e) => {
+                  const p = e.target.value;
+                  localStorage.setItem('matchesPhase', p);
+                  localStorage.setItem('matchesGroup', '');
+
+                  const params = new URLSearchParams(searchParams.toString());
+
+                  if (p) params.set('phase', p);
+                  else params.delete('phase');
+
+                  params.delete('group');
+
+                  const qs = params.toString();
+                  router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
+                }}
+              >
+                <option value="">Todas</option>
+                {phaseOptions.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-sm text-zinc-300">
+              Grupo
+              <select
+                className="rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
+                value={group}
+                disabled={!groupOptions.length}
+                onChange={(e) => {
+                  const g = e.target.value;
+                  localStorage.setItem('matchesGroup', g);
+
+                  const params = new URLSearchParams(searchParams.toString());
+                  if (g) params.set('group', g);
+                  else params.delete('group');
+
+                  const qs = params.toString();
+                  router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
+                }}
+              >
+                <option value="">Todos</option>
+                {groupOptions.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         )}
 
-        {loading ? (
-          <div className="text-sm text-zinc-400">Cargando…</div>
-        ) : items.length === 0 ? (
-          <div className="text-sm text-zinc-400">No hay partidos para estos filtros.</div>
-        ) : (
+        {loading && (
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 text-zinc-300">Cargando…</div>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-200">{error}</div>
+        )}
+
+        {!loading && !error && seasonId && items.length === 0 && (
+          <div className="text-zinc-400">No hay partidos para este evento/filtros.</div>
+        )}
+
+        {!loading && !error && seasonId && !effectiveLeagueId && visibleLeagues.length > 1 && (
+          <div className="text-zinc-400">Selecciona una liga para ver/editar tus pronósticos.</div>
+        )}
+
+        {!loading && !error && items.length > 0 && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800">
-            {items.map((m) => {
+            {items.map((m: any) => {
+              const myPick =
+                effectiveLeagueId && picksLeagueId === effectiveLeagueId ? picksByMatchId[m.id] : undefined;
+
               const locked = isLocked(m);
-              const left = minsLeft(m.closeUtc ?? null);
-              const myPick = picksByMatchId[m.id] ?? null;
+              const kickoffLabel = formatLocalDateTime(locale, m.utcDateTime ?? m.timeUtc ?? null);
+              const closeTs = getCloseTs(m);
+              const remainingMs = closeTs ? closeTs - now : null;
               const hasPick = !!myPick;
 
               return (
                 <div key={m.id} className="px-4 py-3 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <div className="font-medium truncate">
-                      {((m as any).homeTeamName ?? (m as any).homeTeam?.name ?? '—')} vs{' '}
-                      {((m as any).awayTeamName ?? (m as any).awayTeam?.name ?? '—')}
-
+                      {m.homeTeam?.name ?? '—'} <span className="text-zinc-400">vs</span> {m.awayTeam?.name ?? '—'}
                     </div>
 
-                    <div className="text-xs text-zinc-400 mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                      <span>UTC: {fmtUtc(m.utcDateTime)}</span>
-                      <span>Cierra: {fmtClose(m.closeUtc ?? null)}</span>
-                      {typeof left === 'number' && (
-                        <span className={left === 0 ? 'text-red-300' : 'text-zinc-300'}>
-                          {left === 0 ? 'Cerrado' : `${left} min`}
-                        </span>
-                      )}
-                      <span className="text-zinc-500">·</span>
-                      <span>
-                        {((m as any).phaseCode ?? (m as any).phase ?? '')}
-                        {((m as any).groupCode ?? (m as any).group ?? '') ? ` / ${((m as any).groupCode ?? (m as any).group ?? '')}` : ''}
+                    <div className="text-sm text-zinc-400 truncate">{m.timeUtc ?? '—'} UTC · {m.venue ?? '—'}</div>
 
-                      </span>
-                    </div>
-
-                    {hasPick && (
+                    {effectiveLeagueId && myPick && (
                       <div className="mt-1 text-sm text-emerald-300">
-                        Tu pick: {myPick.homePred} - {myPick.awayPred}
-                        <span className="text-zinc-400"> · {myPick.status}</span>
+                        Tu pick: {(myPick as any).homePred} - {(myPick as any).awayPred}
+                        <span className="text-zinc-400"> · {(myPick as any).status}</span>
                       </div>
                     )}
+
+                    <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
+                      <div>Hora local: {kickoffLabel || '—'}</div>
+                      {closeTs ? (
+                        locked ? (
+                          <div style={{ color: '#b00020' }}>Cerrado</div>
+                        ) : (
+                          <div>
+                            Cierra en: <strong>{formatCountdown(Math.max(0, remainingMs ?? 0))}</strong>
+                          </div>
+                        )
+                      ) : (
+                        <div>Cierre: —</div>
+                      )}
+                    </div>
                   </div>
 
-                  <button
-                    onClick={() => openPickModal(m)}
-                    className={
-                      locked
-                        ? 'rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-300'
-                        : 'rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-black hover:bg-emerald-500'
-                    }
-                  >
-                    {locked ? 'Cerrado' : hasPick ? 'Editar' : 'Pronosticar'}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {m.score ? (
+                      <div className="flex flex-col items-end">
+                        <div className="text-[11px] text-zinc-400 leading-none mb-1">Resultado oficial del partido</div>
+                        <div className="px-3 py-1 rounded-lg bg-zinc-800 text-sm">
+                          {m.score.home} - {m.score.away}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-3 py-1 rounded-lg bg-zinc-800 text-sm text-zinc-300">{m.status ?? '—'}</div>
+                    )}
+
+                    <button
+                      className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-50"
+                      onClick={() => openPickModal(m)}
+                      disabled={!effectiveLeagueId || locked || loadingPicks}
+                      title={
+                        !effectiveLeagueId
+                          ? 'Selecciona una liga primero'
+                          : loadingPicks
+                          ? 'Cargando picks de la liga...'
+                          : locked
+                          ? 'Partido cerrado. Pick bloqueado.'
+                          : hasPick
+                          ? 'Editar pronóstico'
+                          : 'Pronosticar'
+                      }
+                    >
+                      {locked ? 'Cerrado' : hasPick ? 'Editar' : 'Pronosticar'}
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -407,23 +891,18 @@ export default function MatchesPage() {
         )}
       </div>
 
+      {/* MODAL */}
       {open && selected && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-[520px] max-w-[95vw] rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
+                <div className="text-sm text-zinc-400">Pronóstico</div>
                 <div className="text-lg font-semibold">
-                  {((selected as any).homeTeamName ?? (selected as any).homeTeam?.name ?? '—')} vs{' '}
-                  {((selected as any).awayTeamName ?? (selected as any).awayTeam?.name ?? '—')}
-
+                  {(selected as any).homeTeam?.name ?? '—'} vs {(selected as any).awayTeam?.name ?? '—'}
                 </div>
-                <div className="text-xs text-zinc-400 mt-1">
-                  Cierra: {fmtClose((selected as any).closeUtc ?? null)} UTC ·{' '}
-                  {((selected as any).phaseCode ?? (selected as any).phase ?? '') as any}
-                  {(((selected as any).groupCode ?? (selected as any).group ?? '') as string)
-                    ? ` / ${((selected as any).groupCode ?? (selected as any).group ?? '') as string}`
-                    : ''}
-
+                <div className="text-sm text-zinc-400 mt-1">
+                  {(selected as any).dateKey ?? '—'} · {(selected as any).timeUtc ?? '—'} UTC
                 </div>
               </div>
 
@@ -432,7 +911,7 @@ export default function MatchesPage() {
                   setOpen(false);
                   setSelected(null);
                 }}
-                className="rounded-md bg-zinc-800 px-2 py-1 text-sm hover:bg-zinc-700"
+                className="rounded-lg bg-zinc-800 px-3 py-1 hover:bg-zinc-700"
               >
                 X
               </button>
@@ -440,26 +919,64 @@ export default function MatchesPage() {
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-zinc-400 mb-1">{((selected as any).homeTeamName ?? (selected as any).homeTeam?.name ?? '—') as any}
-              </div>
+                <div className="text-sm text-zinc-400">{(selected as any).homeTeam?.name ?? 'Local'}</div>
                 <input
                   type="number"
+                  min={0}
+                  max={50}
                   value={homePred}
-                  onChange={(e) => setHomePred(Number(e.target.value))}
-                  className="w-full rounded-lg bg-zinc-900 px-3 py-2 text-sm ring-1 ring-zinc-800"
+                  onChange={(e) => setHomePred(e.target.value)}
+                  disabled={selectedLocked}
+                  className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 disabled:opacity-50"
                 />
               </div>
+
               <div>
-                <div className="text-xs text-zinc-400 mb-1">{((selected as any).awayTeamName ?? (selected as any).awayTeam?.name ?? '—') as any}
-                </div>
+                <div className="text-sm text-zinc-400">{(selected as any).awayTeam?.name ?? 'Visitante'}</div>
                 <input
                   type="number"
+                  min={0}
+                  max={50}
                   value={awayPred}
-                  onChange={(e) => setAwayPred(Number(e.target.value))}
-                  className="w-full rounded-lg bg-zinc-900 px-3 py-2 text-sm ring-1 ring-zinc-800"
+                  onChange={(e) => setAwayPred(e.target.value)}
+                  disabled={selectedLocked}
+                  className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 disabled:opacity-50"
                 />
               </div>
             </div>
+
+            {((selected as any).phaseCode && (selected as any).phaseCode !== 'F01') &&
+            homePred.trim() !== '' &&
+            awayPred.trim() !== '' &&
+            Number(homePred) === Number(awayPred) ? (
+              <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+                <div className="text-sm text-zinc-300 font-medium">KO: ¿Quién avanza?</div>
+                <div className="text-xs text-zinc-400 mt-1">
+                  Como pronosticaste empate, debes elegir quién pasa a la siguiente fase.
+                </div>
+
+                <div className="mt-2 flex items-center gap-2">
+                  <select
+                    className="rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                    value={koWinnerTeamId}
+                    onChange={(e) => setKoWinnerTeamId(e.target.value)}
+                  >
+                    <option value="">— Selecciona —</option>
+                    <option value={(selected as any).homeTeam?.id}>{(selected as any).homeTeam?.name}</option>
+                    <option value={(selected as any).awayTeam?.id}>{(selected as any).awayTeam?.name}</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
+                    onClick={() => setKoWinnerTeamId('')}
+                    title="Quitar selección"
+                  >
+                    Limpiar
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {saveError && (
               <div className="mt-3 rounded-lg border border-red-900 bg-red-950/50 p-2 text-sm text-red-200">
@@ -479,24 +996,19 @@ export default function MatchesPage() {
                 Cancelar
               </button>
 
-              {(() => {
-                const selectedLocked = isLocked(selected);
-                return (
-                  <button
-                    onClick={onSave}
-                    className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-black hover:bg-emerald-500 disabled:opacity-50"
-                    disabled={saving || selectedLocked}
-                  >
-                    {selectedLocked ? 'Cerrado' : saving ? 'Guardando…' : 'Guardar'}
-                  </button>
-                );
-              })()}
+              <button
+                onClick={onSave}
+                className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-black hover:bg-emerald-500 disabled:opacity-50"
+                disabled={saving || selectedLocked}
+              >
+                {selectedLocked ? 'Cerrado' : saving ? 'Guardando…' : 'Guardar'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ✅ Un solo widget */}
+      {/* Chatbot IA */}
       <AiChatWidget locale={locale} token={token} context={aiContext} />
     </div>
   );
