@@ -5,7 +5,20 @@ type Row = { userId: string; points: number; rank: number; displayName?: string 
 
 @Injectable()
 export class LeaderboardsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private async resolveSeasonDefaultRuleId(seasonId?: string | null): Promise<string> {
+    // Fallback seguro si no hay evento seleccionado
+    if (!seasonId) return 'B01';
+
+    const s = await this.prisma.season.findUnique({
+      where: { id: seasonId },
+      select: { defaultScoringRuleId: true },
+    });
+
+    // Si por alguna razón el evento no tiene default, caemos a B01
+    return s?.defaultScoringRuleId ?? 'B01';
+  }
+
+  constructor(private readonly prisma: PrismaService) { }
 
   private async attachNames(rows: Row[]) {
     const ids = Array.from(new Set(rows.map(r => r.userId)));
@@ -88,8 +101,8 @@ export class LeaderboardsService {
     };
   }
 
-  async worldLeaderboard(opts: { viewerUserId: string; limit: number }) {
-    const B01 = 'B01';
+  async worldLeaderboard(opts: { viewerUserId: string; limit: number; seasonId?: string }) {
+    const ruleId = await this.resolveSeasonDefaultRuleId(opts.seasonId);
 
     const top = await this.prisma.$queryRaw<Row[]>`
       WITH league_totals AS (
@@ -97,8 +110,9 @@ export class LeaderboardsService {
         FROM "PickScore" ps
         JOIN "Pick" p ON p.id = ps."pickId"
         JOIN "Match" m ON m.id = p."matchId"
-        WHERE ps."ruleId" = ${B01}
+        WHERE ps."ruleId" = ${ruleId}
           AND m."resultConfirmed" = true
+          AND (${opts.seasonId} IS NULL OR m."seasonId" = ${opts.seasonId})
         GROUP BY p."userId", p."leagueId"
       ),
       best AS (
@@ -123,8 +137,9 @@ export class LeaderboardsService {
         FROM "PickScore" ps
         JOIN "Pick" p ON p.id = ps."pickId"
         JOIN "Match" m ON m.id = p."matchId"
-        WHERE ps."ruleId" = ${B01}
+        WHERE ps."ruleId" = ${ruleId}
           AND m."resultConfirmed" = true
+          AND (${opts.seasonId} IS NULL OR m."seasonId" = ${opts.seasonId})
         GROUP BY p."userId", p."leagueId"
       ),
       best AS (
@@ -145,15 +160,15 @@ export class LeaderboardsService {
 
     return {
       scope: 'WORLD',
-      ruleIdUsed: B01,
+      ruleIdUsed: ruleId,
       bestMode: 'BEST_LEAGUE_TOTAL',
       top: await this.attachNames(top),
       me: (await this.attachNames(meArr))[0] ?? null,
     };
   }
 
-  async countryLeaderboard(opts: { countryCode: string; viewerUserId: string; limit: number }) {
-    const B01 = 'B01';
+  async countryLeaderboard(opts: { countryCode: string; viewerUserId: string; limit: number; seasonId?: string }) {
+    const ruleId = await this.resolveSeasonDefaultRuleId(opts.seasonId);
 
     const top = await this.prisma.$queryRaw<Row[]>`
       WITH league_totals AS (
@@ -161,8 +176,9 @@ export class LeaderboardsService {
         FROM "PickScore" ps
         JOIN "Pick" p ON p.id = ps."pickId"
         JOIN "Match" m ON m.id = p."matchId"
-        WHERE ps."ruleId" = ${B01}
+                WHERE ps."ruleId" = ${ruleId}
           AND m."resultConfirmed" = true
+          AND (${opts.seasonId} IS NULL OR m."seasonId" = ${opts.seasonId})
         GROUP BY p."userId", p."leagueId"
       ),
       best AS (
@@ -189,8 +205,9 @@ export class LeaderboardsService {
         FROM "PickScore" ps
         JOIN "Pick" p ON p.id = ps."pickId"
         JOIN "Match" m ON m.id = p."matchId"
-        WHERE ps."ruleId" = ${B01}
+                WHERE ps."ruleId" = ${ruleId}
           AND m."resultConfirmed" = true
+          AND (${opts.seasonId} IS NULL OR m."seasonId" = ${opts.seasonId})
         GROUP BY p."userId", p."leagueId"
       ),
       best AS (
@@ -214,7 +231,7 @@ export class LeaderboardsService {
     return {
       scope: 'COUNTRY',
       countryCode: opts.countryCode,
-      ruleIdUsed: B01,
+      ruleIdUsed: ruleId,
       bestMode: 'BEST_LEAGUE_TOTAL',
       top: await this.attachNames(top),
       me: (await this.attachNames(meArr))[0] ?? null,

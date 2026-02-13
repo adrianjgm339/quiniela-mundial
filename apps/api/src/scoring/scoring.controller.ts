@@ -7,22 +7,43 @@ import { JwtAuthGuard } from '../auth/jwt.guard'; // ajusta si tu guard está en
 export class ScoringController {
   constructor(private readonly scoring: ScoringService) { }
 
-    private assertAdmin(req: any) {
+  private assertAdmin(req: any) {
     if (req.user?.role !== 'ADMIN') throw new ForbiddenException('Admin only');
   }
 
   @Get('rules')
-  async listRules(@Req() req: any) {
-    this.assertAdmin(req);
-    return this.scoring.listRules();
+  async listRules(@Query('seasonId') seasonId?: string) {
+    // lectura: cualquier usuario autenticado
+    return this.scoring.listRules(seasonId || undefined);
+  }
+
+  @Get('concepts')
+  async listConcepts(@Query('seasonId') seasonId?: string) {
+    if (!seasonId) throw new NotFoundException('seasonId is required');
+    return this.scoring.listSeasonConcepts(seasonId);
   }
 
   @Get('rules/:id')
-  async getRule(@Req() req: any, @Param('id') id: string) {
-    this.assertAdmin(req);
+  async getRule(@Param('id') id: string) {
+    // lectura: cualquier usuario autenticado
     const rule = await this.scoring.getRule(id);
     if (!rule) throw new NotFoundException('Rule not found');
     return rule;
+  }
+
+  @Post('rules/custom')
+  async createCustomRule(
+    @Body()
+    body: {
+      seasonId: string;
+      name: string;
+      description?: string | null;
+      details: Array<{ code: string; points: number }>;
+    },
+  ) {
+    // Cualquier usuario autenticado puede crear una regla personalizada
+    // (la restricción “solo admin de liga” la conectamos cuando implementemos roles por liga en UI/Configurar)
+    return this.scoring.createCustomRule(body);
   }
 
   @Post('rules')

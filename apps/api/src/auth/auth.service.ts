@@ -5,7 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService) {}
+  constructor(private prisma: PrismaService, private jwt: JwtService) { }
 
   async register(input: { email: string; password: string; displayName: string }) {
     const email = (input.email || '').trim().toLowerCase();
@@ -52,7 +52,22 @@ export class AuthService {
     return { user: safeUser, token };
   }
 
-    async me(userId: string, locale: string) {
+  async setActiveSeason(userId: string, seasonId: string) {
+    const sid = (seasonId || '').trim();
+    if (!sid) throw new BadRequestException('seasonId is required');
+
+    const season = await this.prisma.season.findUnique({ where: { id: sid } });
+    if (!season) throw new BadRequestException('Season not found');
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { activeSeasonId: sid },
+    });
+
+    return { ok: true, activeSeasonId: sid };
+  }
+
+  async me(userId: string, locale: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -103,20 +118,20 @@ export class AuthService {
       ...user,
       activeSeason: user.activeSeason
         ? {
-            id: user.activeSeason.id,
-            slug: user.activeSeason.slug,
-            name: user.activeSeason.translations[0]?.name ?? '',
-            competition: {
-              id: user.activeSeason.competition.id,
-              slug: user.activeSeason.competition.slug,
-              name: user.activeSeason.competition.translations[0]?.name ?? '',
-              sport: {
-                id: user.activeSeason.competition.sport.id,
-                slug: user.activeSeason.competition.sport.slug,
-                name: user.activeSeason.competition.sport.translations[0]?.name ?? '',
-              },
+          id: user.activeSeason.id,
+          slug: user.activeSeason.slug,
+          name: user.activeSeason.translations[0]?.name ?? '',
+          competition: {
+            id: user.activeSeason.competition.id,
+            slug: user.activeSeason.competition.slug,
+            name: user.activeSeason.competition.translations[0]?.name ?? '',
+            sport: {
+              id: user.activeSeason.competition.sport.id,
+              slug: user.activeSeason.competition.sport.slug,
+              name: user.activeSeason.competition.sport.translations[0]?.name ?? '',
             },
-          }
+          },
+        }
         : null,
     };
   }

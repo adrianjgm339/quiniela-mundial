@@ -10,9 +10,10 @@ import { PicksModule } from './picks/picks.module';
 import { LeaguesModule } from './leagues/leagues.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { LeaderboardsModule } from './leaderboards/leaderboards.module';
+import { AdminGroupsModule } from './admin-groups/admin-groups.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, CatalogModule, UsersModule, MatchesModule, PicksModule, LeaguesModule, ScoringModule, LeaderboardsModule],
+  imports: [PrismaModule, AuthModule, CatalogModule, UsersModule, MatchesModule, PicksModule, LeaguesModule, ScoringModule, LeaderboardsModule, AdminGroupsModule],
   controllers: [AppController],
   providers: [AppService],
 })

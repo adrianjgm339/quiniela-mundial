@@ -29,3 +29,11 @@ input[type="submit"],
 input[type="reset"] {
   cursor: pointer;
 }
+
+/* FIX UX: nunca mostrar "manito" en controles deshabilitados */
+button:disabled,
+select:disabled,
+textarea:disabled,
+input:disabled {
+  cursor: not-allowed !important;
+}

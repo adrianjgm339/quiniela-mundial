@@ -108,13 +108,14 @@ export default function AdminHomePage() {
                         borderRadius: 10,
                     }}
                 >
+
                     <div style={{ display: "grid", gap: 10 }}>
-                        <Link
-                            href={`/${locale}/admin/results`}
-                            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
+                        <button
+                            onClick={() => router.push(`/${locale}/admin/results`)}
+                            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-left"
                         >
                             Resultados (cargar marcadores + confirmar + recalcular)
-                        </Link>
+                        </button>
 
                         <Link
                             href={`/${locale}/admin/rules`}
@@ -124,11 +125,33 @@ export default function AdminHomePage() {
                         </Link>
 
                         <Link
+                            href={`/${locale}/admin/catalog`}
+                            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
+                        >
+                            Catálogo (deportes · competiciones · eventos)
+                        </Link>
+
+                        <Link
                             href={`/${locale}/rankings`}
                             className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
                         >
                             Ver Rankings
                         </Link>
+
+                        <div style={{ marginTop: 8, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
+                            <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6, opacity: 0.7, marginBottom: 8 }}>
+                                Admin · Fase de Grupos
+                            </div>
+
+                            <div style={{ display: "grid", gap: 10 }}>
+                                <Link
+                                    href={`/${locale}/admin/groups`}
+                                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
+                                >
+                                    Grupos (standings + terceros + cerrar fase + manual)
+                                </Link>
+                            </div>
+                        </div>
 
                         {/* Placeholders para el backlog inmediato */}
                         <div style={{ opacity: 0.7, fontSize: 13, marginTop: 8 }}>
