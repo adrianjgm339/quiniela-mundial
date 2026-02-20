@@ -16,7 +16,6 @@ import {
   type CatalogSport,
 } from '@/lib/api';
 import AiChatWidget from '../../components/AiChatWidget';
-import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
