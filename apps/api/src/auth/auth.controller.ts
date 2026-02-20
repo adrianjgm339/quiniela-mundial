@@ -27,6 +27,19 @@ export class AuthController {
     return this.auth.login(body);
   }
 
+  @HttpCode(200)
+  @Post('google')
+  google(@Body() body: { idToken: string }) {
+    return this.auth.googleLogin(body);
+  }
+
+  @HttpCode(200)
+  @Post('forgot-password')
+  forgotPassword(@Body() body: { email: string }) {
+    return this.auth.forgotPassword(body);
+  }
+
+
   @Get('me')
   @UseGuards(JwtAuthGuard)
   me(@Req() req: any, @Query('locale') locale = 'es') {

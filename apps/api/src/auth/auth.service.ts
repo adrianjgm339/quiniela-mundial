@@ -1,11 +1,19 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { OAuth2Client } from 'google-auth-library';
+import { randomBytes } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService) { }
+  private googleClient: OAuth2Client;
+
+  constructor(private prisma: PrismaService, private jwt: JwtService) {
+    // Usa GOOGLE_CLIENT_ID en el backend (no NEXT_PUBLIC_)
+    const clientId = process.env.GOOGLE_CLIENT_ID || '';
+    this.googleClient = new OAuth2Client(clientId);
+  }
 
   async register(input: { email: string; password: string; displayName: string }) {
     const email = (input.email || '').trim().toLowerCase();
@@ -51,6 +59,69 @@ export class AuthService {
     const token = this.jwt.sign({ sub: user.id, email: user.email, role: user.role });
     return { user: safeUser, token };
   }
+
+    async googleLogin(input: { idToken: string }) {
+    const idToken = (input.idToken || '').trim();
+    if (!idToken) throw new BadRequestException('idToken is required');
+
+    const clientId = process.env.GOOGLE_CLIENT_ID || '';
+    if (!clientId) {
+      throw new BadRequestException('GOOGLE_CLIENT_ID is not configured');
+    }
+
+    // Verifica firma + audience + expiración del token
+    const ticket = await this.googleClient.verifyIdToken({
+      idToken,
+      audience: clientId,
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload?.email) throw new UnauthorizedException('Invalid Google token');
+
+    const email = payload.email.trim().toLowerCase();
+    const displayName =
+      (payload.name || '').trim() ||
+      email.split('@')[0] ||
+      'User';
+
+    // Buscar usuario por email
+    let user = await this.prisma.user.findUnique({ where: { email } });
+
+    // Si no existe, crear usuario automático (MVP)
+    if (!user) {
+      // Como tu schema usa passwordHash (y login asume que existe),
+      // generamos un password aleatorio y lo hasheamos.
+      const randomPassword = randomBytes(32).toString('hex');
+      const passwordHash = await bcrypt.hash(randomPassword, 10);
+
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          passwordHash,
+          displayName,
+        },
+      });
+    }
+
+    const safeUser = {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      createdAt: user.createdAt,
+    };
+
+    const token = this.jwt.sign({ sub: user.id, email: user.email, role: user.role });
+    return { user: safeUser, token };
+  }
+
+  async forgotPassword(input: { email: string }) {
+    // Stub MVP anti-enumeration:
+    // Siempre respondemos OK, exista o no exista el email.
+    // Luego lo conectamos a email provider + token reset.
+    return { ok: true, message: 'Si existe una cuenta con ese email, recibirás instrucciones.' };
+  }
+
 
   async setActiveSeason(userId: string, seasonId: string) {
     const sid = (seasonId || '').trim();

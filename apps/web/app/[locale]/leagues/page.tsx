@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/ui/page-header';
+import AiChatWidget from '../../components/AiChatWidget';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3001';
 
@@ -311,6 +312,58 @@ export default function LeaguesPage() {
     return leagues.filter((l: any) => l?.seasonId === selectedSeasonFilterId);
   }, [leagues, selectedSeasonFilterId]);
 
+    const aiContext = useMemo(() => {
+    return {
+      page: 'leagues',
+      locale,
+      token,
+      activeSeasonId,
+      activeSeasonNameLabel,
+
+      // filtros UI
+      selectedSportId,
+      selectedCompetitionId,
+      selectedSeasonFilterId,
+
+      // ligas
+      leaguesCount: leagues?.length ?? 0,
+      leaguesByEventCount: leaguesByEvent?.length ?? 0,
+
+      selectedLeague: selectedLeague
+        ? {
+            id: selectedLeague.id,
+            name: selectedLeague.name,
+            joinCode: selectedLeague.joinCode,
+            joinPolicy: (selectedLeague as any).joinPolicy ?? null,
+            scoringRuleId: (selectedLeague as any).scoringRuleId ?? null,
+            seasonId: (selectedLeague as any).seasonId ?? null,
+            myRole: (selectedLeague as any).myRole ?? myLeagueRole ?? null,
+          }
+        : null,
+
+      // estado creación/entrada (útil para el bot)
+      newJoinPolicy,
+      newRuleMode,
+      selectedRuleId,
+      joinCode,
+    };
+  }, [
+    locale,
+    token,
+    activeSeasonId,
+    activeSeasonNameLabel,
+    selectedSportId,
+    selectedCompetitionId,
+    selectedSeasonFilterId,
+    leagues,
+    leaguesByEvent,
+    selectedLeague,
+    myLeagueRole,
+    newJoinPolicy,
+    newRuleMode,
+    selectedRuleId,
+    joinCode,
+  ]);
 
   // Al escoger evento aquí, lo dejamos como activeSeasonId para el createLeague
   useEffect(() => {
@@ -1207,6 +1260,8 @@ export default function LeaguesPage() {
             </div>
           )}
         </Card>
+                {/* Chatbot IA */}
+        <AiChatWidget locale={locale} token={token} context={aiContext} />
       </div>
     </div>
   );

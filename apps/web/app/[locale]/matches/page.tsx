@@ -20,6 +20,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { TeamWithFlag } from "@/components/team-with-flag";
+import AiChatWidget from '../../components/AiChatWidget';
 
 export default function MatchesPage() {
   const router = useRouter();
@@ -604,6 +605,43 @@ export default function MatchesPage() {
   const activeLeague = effectiveLeagueId
     ? leagues.find((l) => l.id === effectiveLeagueId)
     : null;
+  const aiContext = useMemo(() => {
+    return {
+      page: 'matches',
+      locale,
+      token,
+      sportId,
+      competitionId,
+      seasonId,
+      phase,
+      group,
+      effectiveLeagueId,
+      activeLeague: activeLeague
+        ? { id: activeLeague.id, name: activeLeague.name, joinCode: activeLeague.joinCode }
+        : null,
+      selectedMatch: selected
+        ? {
+          id: selected.id,
+          home: selected.homeTeam?.name ?? '',
+          away: selected.awayTeam?.name ?? '',
+          timeUtc: (selected as any).timeUtc ?? null,
+          utcDateTime: (selected as any).utcDateTime ?? null,
+          closeUtc: (selected as any).closeUtc ?? null,
+        }
+        : null,
+    };
+  }, [
+    locale,
+    token,
+    sportId,
+    competitionId,
+    seasonId,
+    phase,
+    group,
+    effectiveLeagueId,
+    activeLeague,
+    selected,
+  ]);
 
   const activeLeagueLabel = activeLeague
     ? `${activeLeague.name} · Código: ${activeLeague.joinCode}`
@@ -1033,6 +1071,9 @@ export default function MatchesPage() {
           )}
 
         </div>
+
+        {/* Chatbot IA */}
+        <AiChatWidget locale={locale} token={token} context={aiContext} />
 
         {/* MODAL */}
         {

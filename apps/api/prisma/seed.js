@@ -1,7 +1,12 @@
 const { PrismaClient } = require("@prisma/client");
+const bcrypt = require("bcrypt");
+
 const prisma = new PrismaClient();
 
 async function main() {
+  // ============================
+  // SPORT + COMPETITION + SEASON
+  // ============================
   const sport = await prisma.sport.upsert({
     where: { slug: "soccer" },
     update: {},
@@ -163,7 +168,51 @@ async function main() {
     }
   }
 
-  console.log("Seed OK: scoring rules (B01, R01-R05)");
+  // ============================
+  // USERS (ADMIN + DEMO USER)
+  // ============================
+  const adminEmail = "admin@demo.com";
+  const adminPass = "admin123";
+  const adminHash = await bcrypt.hash(adminPass, 10);
+
+  await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {
+      displayName: "Admin Demo",
+      role: "ADMIN",
+      // Si quieres que el password se mantenga igual siempre en dev, lo actualizamos:
+      passwordHash: adminHash,
+      activeSeasonId: season.id,
+    },
+    create: {
+      email: adminEmail,
+      passwordHash: adminHash,
+      displayName: "Admin Demo",
+      role: "ADMIN",
+      activeSeasonId: season.id,
+    },
+  });
+
+  const userEmail = "test2@demo.com";
+  const userPass = "demo123";
+  const userHash = await bcrypt.hash(userPass, 10);
+
+  await prisma.user.upsert({
+    where: { email: userEmail },
+    update: {
+      displayName: "User Demo",
+      role: "USER",
+      passwordHash: userHash,
+      activeSeasonId: season.id,
+    },
+    create: {
+      email: userEmail,
+      passwordHash: userHash,
+      displayName: "User Demo",
+      role: "USER",
+      activeSeasonId: season.id,
+    },
+  });
 
   // Set default (standard) rule for this season
   await prisma.season.update({
@@ -192,6 +241,8 @@ async function main() {
   console.log("Seed OK: season scoring concepts (soccer)");
 
   console.log("Seed OK: soccer / fifa-world-cup / world-cup-2026");
+  console.log("Seed OK: scoring rules (B01, R01-R05)");
+  console.log("Seed OK: users (admin@demo.com / test2@demo.com)");
 }
 
 main()
