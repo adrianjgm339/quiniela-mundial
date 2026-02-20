@@ -12,6 +12,10 @@ import {
   type LeaderboardRow,
   type CatalogSport,
 } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { PageHeader } from '@/components/ui/page-header';
+import { Badge } from '@/components/ui/badge';
 
 type Tab = 'LEAGUE' | 'WORLD' | 'COUNTRY';
 
@@ -25,30 +29,44 @@ function RowTable({
   me: LeaderboardRow | null;
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
-      <div className="px-4 py-3 border-b border-zinc-800 font-medium">{title}</div>
-
+    <Card className="overflow-hidden">
+      <div className="px-4 py-3 border-b border-[var(--border)] font-medium">{title}</div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-zinc-400">
-            <tr className="border-b border-zinc-800">
+          <thead className="text-[color:var(--muted)]">
+            <tr className="border-b border-[var(--border)]">
               <th className="text-left px-4 py-2 w-16">#</th>
               <th className="text-left px-4 py-2">Jugador</th>
               <th className="text-right px-4 py-2 w-28">Pts</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.userId} className="border-b border-zinc-800/70">
-                <td className="px-4 py-2">{r.rank}</td>
-                <td className="px-4 py-2">{r.displayName ?? r.userId.slice(0, 8)}</td>
-                <td className="px-4 py-2 text-right font-semibold">{r.points}</td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const isMe = !!me && r.userId === me.userId;
+
+              return (
+                <tr
+                  key={r.userId}
+                  className={`border-b border-[var(--border)] ${isMe ? 'font-medium' : ''}`}
+                  style={
+                    isMe
+                      ? {
+                        background: 'color-mix(in srgb, var(--primary) 10%, transparent)',
+                        boxShadow: 'inset 3px 0 0 0 var(--primary)',
+                      }
+                      : undefined
+                  }
+                >
+                  <td className="px-4 py-2">{r.rank}</td>
+                  <td className="px-4 py-2">{r.displayName ?? r.userId.slice(0, 8)}</td>
+                  <td className="px-4 py-2 text-right font-semibold">{r.points}</td>
+                </tr>
+              );
+            })}
 
             {rows.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-3 text-zinc-400">
+                <td colSpan={3} className="px-4 py-3 text-[color:var(--muted)]">
                   Sin datos aún. (Asegúrate de tener partidos confirmados y correr /scoring/recompute)
                 </td>
               </tr>
@@ -57,8 +75,8 @@ function RowTable({
         </table>
       </div>
 
-      <div className="px-4 py-3 bg-zinc-950/40 border-t border-zinc-800">
-        <div className="text-xs text-zinc-400">Tu posición</div>
+      <div className="px-4 py-3 border-t border-[var(--border)] bg-[var(--card)]">
+        <div className="text-xs text-[color:var(--muted)]">Tu posición</div>
         {me ? (
           <div className="mt-1 flex items-center justify-between">
             <div className="font-medium">
@@ -67,12 +85,12 @@ function RowTable({
             <div className="font-semibold">{me.points} pts</div>
           </div>
         ) : (
-          <div className="mt-1 text-zinc-400 text-sm">
+          <div className="mt-1 text-[color:var(--muted)] text-sm">
             Aún no apareces (probablemente no tienes picks para partidos confirmados con puntaje).
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -293,67 +311,61 @@ export default function RankingsPage() {
   }, [tab, countryCode, selectedLeagueId, seasonId, leagues.length, locale, router]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold">Rankings</h1>
-            <div className="text-sm text-zinc-400">{ruleInfo}</div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push(`/${locale}/dashboard`)}
-              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-            >
-              Volver
-            </button>
-          </div>
-        </div>
+    <div className="min-h-screen">
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <PageHeader
+          title="Rankings"
+          subtitle={<span className="text-[color:var(--muted)]">{ruleInfo}</span>}
+          actions={
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/dashboard`)}>
+                Volver
+              </Button>
+            </div>
+          }
+        />
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <Button
+            size="sm"
+            variant={tab === 'LEAGUE' ? 'primary' : 'outline'}
             onClick={() => setTab('LEAGUE')}
-            className={`px-3 py-2 rounded-lg text-sm ${tab === 'LEAGUE' ? 'bg-emerald-600' : 'bg-zinc-800 hover:bg-zinc-700'
-              }`}
           >
             Liga
-          </button>
-          <button
+          </Button>
+
+          <Button
+            size="sm"
+            variant={tab === 'WORLD' ? 'primary' : 'outline'}
             onClick={() => setTab('WORLD')}
-            className={`px-3 py-2 rounded-lg text-sm ${tab === 'WORLD' ? 'bg-emerald-600' : 'bg-zinc-800 hover:bg-zinc-700'
-              }`}
           >
             Mundial
-          </button>
-          <button
+          </Button>
+
+          <Button
+            size="sm"
+            variant={tab === 'COUNTRY' ? 'primary' : 'outline'}
             onClick={() => setTab('COUNTRY')}
-            className={`px-3 py-2 rounded-lg text-sm ${tab === 'COUNTRY' ? 'bg-emerald-600' : 'bg-zinc-800 hover:bg-zinc-700'
-              }`}
           >
             País
-          </button>
+          </Button>
 
           {countryCode ? (
-            <span className="ml-1 px-2 py-2 rounded-lg text-sm bg-zinc-800 border border-zinc-700 text-zinc-200">
-              {countryCode.toUpperCase()}
-            </span>
+            <Badge>{countryCode.toUpperCase()}</Badge>
           ) : (
-            <span className="ml-1 px-2 py-2 rounded-lg text-sm bg-zinc-900 border border-zinc-800 text-zinc-500">
-              --
-            </span>
+            <Badge className="border border-[var(--border)] bg-[var(--card)] text-[color:var(--muted)]">--</Badge>
           )}
         </div>
 
         {/* Filtros en cascada: Sport → Competition → Season (Evento). 
             En tab LEAGUE además mostramos Liga. */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <Card className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
             {/* Deporte */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Deporte</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Deporte</div>
               <select
-                className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-900 border border-zinc-800"
+                className="w-full px-3 py-2 rounded-lg text-sm border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
                 value={sportId}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -376,9 +388,9 @@ export default function RankingsPage() {
 
             {/* Competición */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Competición</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Competición</div>
               <select
-                className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-900 border border-zinc-800"
+                className="w-full px-3 py-2 rounded-lg text-sm border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
                 value={competitionId}
                 disabled={!sportId}
                 onChange={(e) => {
@@ -401,9 +413,9 @@ export default function RankingsPage() {
 
             {/* Evento */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Evento</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Evento</div>
               <select
-                className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-900 border border-zinc-800"
+                className="w-full px-3 py-2 rounded-lg text-sm border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
                 value={seasonId}
                 disabled={!competitionId}
                 onChange={(e) => {
@@ -428,9 +440,9 @@ export default function RankingsPage() {
             {/* Liga (solo en tab LEAGUE) */}
             {tab === 'LEAGUE' ? (
               <div>
-                <div className="text-sm text-zinc-400 mb-1">Liga</div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Liga</div>
                 <select
-                  className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-900 border border-zinc-800"
+                  className="w-full px-3 py-2 rounded-lg text-sm border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
                   value={selectedLeagueId}
                   disabled={!seasonId}
                   onChange={(e) => {
@@ -462,26 +474,22 @@ export default function RankingsPage() {
           {/* Botón auxiliar (solo si no tiene ligas) */}
           {tab === 'LEAGUE' && leagues.length === 0 ? (
             <div className="mt-3">
-              <button
-                onClick={() => router.push(`/${locale}/leagues`)}
-                className="px-3 py-2 rounded-lg text-sm bg-zinc-800 hover:bg-zinc-700"
-              >
+              <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/leagues`)}>
                 Ir a Ligas
-              </button>
+              </Button>
             </div>
           ) : null}
-        </div>
+        </Card>
 
         {loading && (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 text-zinc-300">
-            Cargando…
-          </div>
+          <Card className="p-4 text-[color:var(--muted)]">Cargando…</Card>
         )}
 
         {error && (
-          <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-4 text-red-200">
-            {error}
-          </div>
+          <Card className="p-4 border border-red-500/30">
+            <div className="font-semibold">Error</div>
+            <div className="mt-1 text-[color:var(--muted)]">{error}</div>
+          </Card>
         )}
 
         {!loading && !error && <RowTable title={title} rows={rows} me={me} />}

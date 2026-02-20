@@ -16,6 +16,12 @@ import {
   type CatalogSport,
 } from '@/lib/api';
 import AiChatWidget from '../../components/AiChatWidget';
+import { useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { Badge } from "@/components/ui/badge";
+import { TeamWithFlag } from "@/components/team-with-flag";
 
 export default function MatchesPage() {
   const router = useRouter();
@@ -529,481 +535,607 @@ export default function MatchesPage() {
   const selectedLocked = selected ? isLocked(selected) : false;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold">Partidos</h1>
-            <div className="mt-1 text-sm text-zinc-400">
-              Liga activa: {activeLeagueLabel}
-              {effectiveLeagueId && loadingPicks ? ' · Cargando picks…' : ''}
-            </div>
-          </div>
+    <div className="min-h-screen">
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <div className="max-w-5xl mx-auto space-y-6">
+          <PageHeader
+            title="Partidos"
+            subtitle={
+              <span className="text-[color:var(--muted)]">
+                Liga activa: {activeLeagueLabel}
+                {effectiveLeagueId && loadingPicks ? " · Cargando picks…" : ""}
+              </span>
+            }
+            actions={
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    localStorage.setItem("matchesPhase", "");
+                    localStorage.setItem("matchesGroup", "");
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                localStorage.setItem('matchesPhase', '');
-                localStorage.setItem('matchesGroup', '');
+                    setSportId("");
+                    setCompetitionId("");
+                    setSeasonId("");
+                    setLeagueId(null);
+                    setLeagueConfirmed(false);
+                    setPicksLeagueId(null);
 
-                setSportId('');
-                setCompetitionId('');
-                setSeasonId('');
-                setLeagueId(null);
-                setLeagueConfirmed(false);
-                setPicksLeagueId(null);
+                    localStorage.removeItem("activeSeasonId");
+                    localStorage.removeItem("activeLeagueId");
 
-                localStorage.removeItem('activeSeasonId');
-                localStorage.removeItem('activeLeagueId');
+                    setPicksByMatchId({});
+                    setItems([]);
+                    setAllItems([]);
+                    setError(null);
 
-                setPicksByMatchId({});
-                setItems([]);
-                setAllItems([]);
-                setError(null);
+                    router.replace(`/${locale}/matches`);
+                  }}
+                  title="Quitar filtros"
+                >
+                  Limpiar
+                </Button>
 
-                router.replace(`/${locale}/matches`);
-              }}
-              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
-              title="Quitar filtros"
-            >
-              Limpiar
-            </button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => router.push(`/${locale}/leagues`)}
+                  title="Gestionar ligas"
+                >
+                  Ligas
+                </Button>
 
-            <button
-              onClick={() => router.push(`/${locale}/leagues`)}
-              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-              title="Gestionar ligas"
-            >
-              Ligas
-            </button>
+                <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/dashboard`)}>
+                  Volver
+                </Button>
+              </div>
+            }
+          />
 
-            <button
-              onClick={() => router.push(`/${locale}/dashboard`)}
-              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-            >
-              Volver
-            </button>
-          </div>
-        </div>
+          {/* Opción 2 — Cascada Sport → Competition → Event → League */}
+          <Card className="p-4">
+            <div className="grid grid-cols-1 gap-3">
+              {/* Deporte */}
+              <label className="text-sm text-[color:var(--muted)]">
+                Deporte
+                <select
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50"
+                  value={sportId}
+                  onChange={(e) => {
+                    const v = e.target.value;
 
-        {/* Cascada Sport → Competition → Event → League */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
-          <div className="grid grid-cols-1 gap-3">
-            <label className="text-sm text-zinc-300">
-              Deporte
-              <select
-                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
-                value={sportId}
-                onChange={(e) => {
-                  const v = e.target.value;
+                    // 1) Cambiar deporte y resetear cascada
+                    setSportId(v);
+                    setCompetitionId("");
+                    setSeasonId("");
+                    localStorage.removeItem("activeSeasonId");
+                    localStorage.removeItem("activeLeagueId");
 
-                  setSportId(v);
-                  setCompetitionId('');
-                  setSeasonId('');
-                  localStorage.removeItem('activeSeasonId');
-                  localStorage.removeItem('activeLeagueId');
+                    // 2) Limpiar selección dependiente y data visible (evita confusión)
+                    setLeagueId(null);
+                    setLeagueConfirmed(false);
+                    setPicksByMatchId({});
+                    setPicksLeagueId(null);
+                    setItems([]);
+                    setAllItems([]);
+                    setError(null);
 
-                  setLeagueId(null);
-                  setLeagueConfirmed(false);
-                  setPicksByMatchId({});
-                  setPicksLeagueId(null);
-                  setItems([]);
-                  setAllItems([]);
-                  setError(null);
+                    // 3) Limpiar filtros (URL + localStorage)
+                    localStorage.setItem("matchesPhase", "");
+                    localStorage.setItem("matchesGroup", "");
+                    router.replace(`/${locale}/matches`);
+                  }}
 
-                  localStorage.setItem('matchesPhase', '');
-                  localStorage.setItem('matchesGroup', '');
-                  router.replace(`/${locale}/matches`);
-                }}
-              >
-                <option value="">Seleccionar deporte</option>
-                {catalog.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                >
+                  <option value="">Seleccionar deporte</option>
+                  {catalog.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="text-sm text-zinc-300">
-              Competición
-              <select
-                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
-                value={competitionId}
-                disabled={!sportId}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setCompetitionId(v);
-                  setSeasonId('');
-                  localStorage.removeItem('activeSeasonId');
-                  localStorage.removeItem('activeLeagueId');
+              {/* Competición */}
+              <label className="text-sm text-[color:var(--muted)]">
+                Competición
+                <select
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                  value={competitionId}
+                  disabled={!sportId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCompetitionId(v);
+                    setSeasonId("");
+                    localStorage.removeItem("activeSeasonId");
+                    localStorage.removeItem("activeLeagueId");
 
-                  setLeagueId(null);
-                  setLeagueConfirmed(false);
-                  setPicksByMatchId({});
-                  setPicksLeagueId(null);
-                  setItems([]);
-                  setAllItems([]);
-                  setError(null);
+                    setLeagueId(null);
+                    setLeagueConfirmed(false);
+                    setPicksByMatchId({});
+                    setPicksLeagueId(null);
+                    setItems([]);
+                    setAllItems([]);
+                    setError(null);
 
-                  localStorage.setItem('matchesPhase', '');
-                  localStorage.setItem('matchesGroup', '');
-                  router.replace(`/${locale}/matches`);
-                }}
-              >
-                <option value="">Seleccionar competición</option>
-                {competitionOptions.map((c: any) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                    localStorage.setItem("matchesPhase", "");
+                    localStorage.setItem("matchesGroup", "");
+                    router.replace(`/${locale}/matches`);
+                  }}
 
-            <label className="text-sm text-zinc-300">
-              Evento
-              <select
-                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
-                value={seasonId}
-                disabled={!competitionId}
-                onChange={(e) => {
-                  const v = e.target.value;
 
-                  setSeasonId(v);
-                  if (v) localStorage.setItem('activeSeasonId', v);
-                  else localStorage.removeItem('activeSeasonId');
+                >
+                  <option value="">Seleccionar competición</option>
+                  {competitionOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                  setLeagueId(null);
-                  setLeagueConfirmed(false);
-                  localStorage.removeItem('activeLeagueId');
-                  setPicksByMatchId({});
-                  setPicksLeagueId(null);
-                  setLoadingPicks(false);
-                  setItems([]);
-                  setAllItems([]);
-                  setError(null);
+              {/* Evento */}
+              <label className="text-sm text-[color:var(--muted)]">
+                Evento
+                <select
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                  value={seasonId}
+                  disabled={!competitionId}
+                  onChange={(e) => {
+                    const v = e.target.value;
 
-                  localStorage.setItem('matchesPhase', '');
-                  localStorage.setItem('matchesGroup', '');
-                  router.replace(`/${locale}/matches`);
-                }}
-              >
-                <option value="">Seleccionar evento</option>
-                {seasonOptions.map((s: any) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                    // 1) set evento
+                    setSeasonId(v);
+                    if (v) localStorage.setItem("activeSeasonId", v);
+                    else localStorage.removeItem("activeSeasonId");
 
-            <label className="text-sm text-zinc-300">
-              Liga
-              <select
-                className="mt-1 w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
-                value={effectiveLeagueId ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (!v) {
+                    // 2) reset inmediato (evita que se vea data vieja / picks viejos)
                     setLeagueId(null);
                     setLeagueConfirmed(false);
                     localStorage.removeItem('activeLeagueId');
                     setPicksByMatchId({});
                     setPicksLeagueId(null);
-                    setSaveError(null);
-                    return;
-                  }
-                  onChangeLeague(v);
-                }}
-                disabled={!seasonId || visibleLeagues.length === 0}
-                title="Selecciona la liga para la cual estás pronosticando"
-              >
-                {!seasonId && <option value="">Selecciona evento primero</option>}
-                {seasonId && visibleLeagues.length === 0 && <option value="">Sin ligas en este evento</option>}
-                {seasonId && visibleLeagues.length > 1 && <option value="">Seleccionar</option>}
-                {seasonId &&
-                  visibleLeagues.map((l: any) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.joinCode})
+                    setLoadingPicks(false);
+                    setItems([]);
+                    setAllItems([]);
+                    setError(null);
+
+                    // 3) reset filtros (URL + localStorage)
+                    localStorage.setItem("matchesPhase", "");
+                    localStorage.setItem("matchesGroup", "");
+                    router.replace(`/${locale}/matches`);
+                  }}
+
+                >
+                  <option value="">Seleccionar evento</option>
+                  {seasonOptions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
                     </option>
                   ))}
-              </select>
-            </label>
-          </div>
-        </div>
+                </select>
+              </label>
 
-        {showPhaseGroupFilters && (
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="text-sm text-zinc-300">
-              Fase
-              <select
-                className="rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
-                value={phase}
-                onChange={(e) => {
-                  const p = e.target.value;
-                  localStorage.setItem('matchesPhase', p);
-                  localStorage.setItem('matchesGroup', '');
+              {/* Liga */}
+              <label className="text-sm text-[color:var(--muted)]">
+                Liga
+                <select
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                  value={effectiveLeagueId ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) {
+                      setLeagueId(null);
+                      setLeagueConfirmed(false);
+                      localStorage.removeItem("activeLeagueId");
+                      setPicksByMatchId({});
+                      setPicksLeagueId(null);
+                      setSaveError(null);
+                      return;
+                    }
+                    onChangeLeague(v);
+                  }}
+                  disabled={!seasonId || visibleLeagues.length === 0}
+                  title="Selecciona la liga para la cual estás pronosticando"
+                >
+                  {!seasonId && <option value="">Selecciona evento primero</option>}
+                  {seasonId && visibleLeagues.length === 0 && <option value="">Sin ligas en este evento</option>}
+                  {seasonId && visibleLeagues.length > 1 && <option value="">Seleccionar</option>}
+                  {seasonId &&
+                    visibleLeagues.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} ({l.joinCode})
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+          </Card>
 
-                  const params = new URLSearchParams(searchParams.toString());
+          {showPhaseGroupFilters && (
+            <Card className="p-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="text-sm text-[color:var(--muted)]">
+                  Fase
+                  <select
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+                    value={phase}
+                    onChange={(e) => {
+                      const p = e.target.value;
+                      localStorage.setItem("matchesPhase", p);
+                      if (p) localStorage.setItem("matchesGroup", "");
 
-                  if (p) params.set('phase', p);
-                  else params.delete('phase');
+                      const params = new URLSearchParams(searchParams.toString());
 
-                  params.delete('group');
+                      if (p) params.set("phase", p);
+                      else params.delete("phase");
 
-                  const qs = params.toString();
-                  router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
-                }}
-              >
-                <option value="">Todas</option>
-                {phaseOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </label>
+                      // Al cambiar fase, limpiamos grupo para evitar inconsistencias entre eventos/fases
+                      localStorage.setItem("matchesGroup", "");
+                      params.delete("group");
 
-            <label className="text-sm text-zinc-300">
-              Grupo
-              <select
-                className="rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm disabled:opacity-50"
-                value={group}
-                disabled={!groupOptions.length}
-                onChange={(e) => {
-                  const g = e.target.value;
-                  localStorage.setItem('matchesGroup', g);
+                      const qs = params.toString();
+                      router.replace(`/${locale}/matches${qs ? `?${qs}` : ""}`);
+                    }}
+                    title="Filtrar por fase"
+                  >
+                    <option value="">Todas</option>
+                    {phaseOptions.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                  const params = new URLSearchParams(searchParams.toString());
-                  if (g) params.set('group', g);
-                  else params.delete('group');
+                <label className="text-sm text-[color:var(--muted)]">
+                  Grupo
+                  <select
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50"
+                    value={group}
+                    disabled={!groupOptions.length}
+                    onChange={(e) => {
+                      const g = e.target.value;
+                      localStorage.setItem("matchesGroup", g);
 
-                  const qs = params.toString();
-                  router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
-                }}
-              >
-                <option value="">Todos</option>
-                {groupOptions.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
+                      const params = new URLSearchParams(searchParams.toString());
 
-        {loading && (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 text-zinc-300">Cargando…</div>
-        )}
+                      if (g) params.set("group", g);
+                      else params.delete("group");
 
-        {error && (
-          <div className="rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-200">{error}</div>
-        )}
+                      const qs = params.toString();
+                      router.replace(`/${locale}/matches${qs ? `?${qs}` : ""}`);
+                    }}
+                    title={
+                      !allGroupOptions.length
+                        ? "Este evento no tiene grupos"
+                        : !groupOptions.length
+                          ? "Esta fase no tiene grupos"
+                          : "Filtrar por grupo"
+                    }
+                  >
+                    <option value="">Todos</option>
+                    {groupOptions.map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </Card>
+          )}
 
-        {!loading && !error && seasonId && items.length === 0 && (
-          <div className="text-zinc-400">No hay partidos para este evento/filtros.</div>
-        )}
+          {loading && (
+            <Card className="p-4 text-[color:var(--muted)]">
+              Cargando partidos…
+            </Card>
+          )}
 
-        {!loading && !error && seasonId && !effectiveLeagueId && visibleLeagues.length > 1 && (
-          <div className="text-zinc-400">Selecciona una liga para ver/editar tus pronósticos.</div>
-        )}
+          {error && (
+            <Card className="p-4 border border-red-500/30">
+              {error}
+            </Card>
+          )}
 
-        {!loading && !error && items.length > 0 && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800">
-            {items.map((m: any) => {
-              const myPick =
-                effectiveLeagueId && picksLeagueId === effectiveLeagueId ? picksByMatchId[m.id] : undefined;
+          {!loading &&
+            !error &&
+            grouped.map(([dateKey, matches]) => (
+              <Card key={dateKey} className="overflow-hidden">
+                <div className="px-4 py-3 border-b border-[var(--border)] font-medium">{dateKey}</div>
 
-              const locked = isLocked(m);
-              const kickoffLabel = formatLocalDateTime(locale, m.utcDateTime ?? m.timeUtc ?? null);
-              const closeTs = getCloseTs(m);
-              const remainingMs = closeTs ? closeTs - now : null;
-              const hasPick = !!myPick;
+                <div className="divide-y divide-[var(--border)]">
+                  {matches.map((m) => {
+                    const myPick =
+                      effectiveLeagueId && picksLeagueId === effectiveLeagueId
+                        ? picksByMatchId[m.id]
+                        : undefined;
+                    const locked = isLocked(m);
+                    const kickoffLabel = formatLocalDateTime(
+                      locale,
+                      (m as any).utcDateTime ?? (m as any).timeUtc ?? null
+                    );
+                    const closeTs = getCloseTs(m);
+                    const remainingMs = closeTs ? closeTs - now : null;
+                    const hasPick = !!myPick;
 
-              return (
-                <div key={m.id} className="px-4 py-3 flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">
-                      {m.homeTeam?.name ?? '—'} <span className="text-zinc-400">vs</span> {m.awayTeam?.name ?? '—'}
-                    </div>
-
-                    <div className="text-sm text-zinc-400 truncate">{m.timeUtc ?? '—'} UTC · {m.venue ?? '—'}</div>
-
-                    {effectiveLeagueId && myPick && (
-                      <div className="mt-1 text-sm text-emerald-300">
-                        Tu pick: {(myPick as any).homePred} - {(myPick as any).awayPred}
-                        <span className="text-zinc-400"> · {(myPick as any).status}</span>
-                      </div>
-                    )}
-
-                    <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
-                      <div>Hora local: {kickoffLabel || '—'}</div>
-                      {closeTs ? (
-                        locked ? (
-                          <div style={{ color: '#b00020' }}>Cerrado</div>
-                        ) : (
-                          <div>
-                            Cierra en: <strong>{formatCountdown(Math.max(0, remainingMs ?? 0))}</strong>
+                    return (
+                      <div key={m.id} className="px-4 py-3 flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">
+                            <span className="inline-flex items-center gap-2 min-w-0">
+                              <TeamWithFlag
+                                name={m.homeTeam?.name ?? ""}
+                                flagKey={(m.homeTeam as any)?.flagKey ?? null}
+                                isPlaceholder={!!(m.homeTeam as any)?.isPlaceholder}
+                              />
+                              <span className="text-[color:var(--muted)]">vs</span>
+                              <TeamWithFlag
+                                name={m.awayTeam?.name ?? ""}
+                                flagKey={(m.awayTeam as any)?.flagKey ?? null}
+                                isPlaceholder={!!(m.awayTeam as any)?.isPlaceholder}
+                              />
+                            </span>
                           </div>
-                        )
-                      ) : (
-                        <div>Cierre: —</div>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-3">
-                    {m.score ? (
-                      <div className="flex flex-col items-end">
-                        <div className="text-[11px] text-zinc-400 leading-none mb-1">Resultado oficial del partido</div>
-                        <div className="px-3 py-1 rounded-lg bg-zinc-800 text-sm">
-                          {m.score.home} - {m.score.away}
+                          <div className="text-sm text-[color:var(--muted)] truncate">
+                            {m.timeUtc} UTC · {m.venue ?? "—"}
+                          </div>
+
+                          {effectiveLeagueId && myPick && (
+                            <div className="mt-1 text-sm text-[color:var(--accent)]">
+                              Tu pick: {myPick.homePred} - {myPick.awayPred}
+                              <span className="text-[color:var(--muted)]"> · {myPick.status}</span>
+                            </div>
+                          )}
+
+                          <div className="text-xs text-[color:var(--muted)] mt-2">
+                            <div>Hora local: {kickoffLabel || "—"}</div>
+                            {closeTs ? (
+                              locked ? (
+                                <div className="text-red-500">Cerrado</div>
+                              ) : (
+                                <div>
+                                  Cierra en: <strong>{formatCountdown(Math.max(0, remainingMs ?? 0))}</strong>
+                                </div>
+                              )
+                            ) : (
+                              <div>Cierre: —</div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          {m.score ? (
+                            <div className="flex flex-col items-end">
+                              <div className="text-[11px] text-[color:var(--muted)] leading-none mb-1">
+                                Resultado oficial del partido
+                              </div>
+                              <div className="px-3 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm">
+                                {m.score.home} - {m.score.away}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="px-3 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm text-[color:var(--muted)]">
+                              {m.status}
+                            </div>
+                          )}
+
+                          <Button
+                            size="sm"
+                            variant={locked ? "outline" : "primary"}
+                            onClick={() => openPickModal(m)}
+                            disabled={!effectiveLeagueId || locked || loadingPicks}
+                            title={
+                              !effectiveLeagueId
+                                ? "Selecciona una liga primero"
+                                : loadingPicks
+                                  ? "Cargando picks de la liga..."
+                                  : locked
+                                    ? "Partido cerrado. Pick bloqueado."
+                                    : hasPick
+                                      ? "Editar pronóstico"
+                                      : "Pronosticar"
+                            }
+                          >
+                            {locked ? "Cerrado" : hasPick ? "Editar" : "Pronosticar"}
+                          </Button>
                         </div>
                       </div>
-                    ) : (
-                      <div className="px-3 py-1 rounded-lg bg-zinc-800 text-sm text-zinc-300">{m.status ?? '—'}</div>
-                    )}
-
-                    <button
-                      className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-50"
-                      onClick={() => openPickModal(m)}
-                      disabled={!effectiveLeagueId || locked || loadingPicks}
-                      title={
-                        !effectiveLeagueId
-                          ? 'Selecciona una liga primero'
-                          : loadingPicks
-                          ? 'Cargando picks de la liga...'
-                          : locked
-                          ? 'Partido cerrado. Pick bloqueado.'
-                          : hasPick
-                          ? 'Editar pronóstico'
-                          : 'Pronosticar'
-                      }
-                    >
-                      {locked ? 'Cerrado' : hasPick ? 'Editar' : 'Pronosticar'}
-                    </button>
-                  </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+              </Card>
+            ))}
+
+          {!loading && !error && seasonId && items.length === 0 && (
+            <Card className="p-4 text-[color:var(--muted)]">No hay partidos para este evento.</Card>
+          )}
+
+          {!loading && !error && seasonId && !effectiveLeagueId && visibleLeagues.length > 1 && (
+            <Card className="p-4 text-[color:var(--muted)]">No hay partidos para este evento.</Card>
+          )}
+
+        </div>
+
+        {/* MODAL */}
+        {
+          open && selected && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <Card className="w-full max-w-md p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm text-[color:var(--muted)]">Pronóstico</div>
+                    <div className="text-lg font-semibold">
+                      <span className="inline-flex items-center gap-2 min-w-0">
+                        <TeamWithFlag
+                          name={selected.homeTeam?.name ?? ""}
+                          flagKey={(selected.homeTeam as any)?.flagKey ?? null}
+                          isPlaceholder={!!(selected.homeTeam as any)?.isPlaceholder}
+                        />
+                        <span className="text-[color:var(--muted)]">vs</span>
+                        <TeamWithFlag
+                          name={selected.awayTeam?.name ?? ""}
+                          flagKey={(selected.awayTeam as any)?.flagKey ?? null}
+                          isPlaceholder={!!(selected.awayTeam as any)?.isPlaceholder}
+                        />
+                      </span>
+                    </div>
+                    <div className="text-sm text-[color:var(--muted)] mt-1">
+                      {selected.dateKey} · {selected.timeUtc} UTC
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setOpen(false);
+                      setSelected(null);
+                    }}
+                  >
+                    X
+                  </Button>
+                </div>
 
       {/* MODAL */}
       {open && selected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm text-zinc-400">Pronóstico</div>
-                <div className="text-lg font-semibold">
-                  {(selected as any).homeTeam?.name ?? '—'} vs {(selected as any).awayTeam?.name ?? '—'}
-                </div>
-                <div className="text-sm text-zinc-400 mt-1">
-                  {(selected as any).dateKey ?? '—'} · {(selected as any).timeUtc ?? '—'} UTC
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  setSelected(null);
-                }}
-                className="rounded-lg bg-zinc-800 px-3 py-1 hover:bg-zinc-700"
-              >
-                X
-              </button>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-sm text-zinc-400">{(selected as any).homeTeam?.name ?? 'Local'}</div>
-                <input
-                  type="number"
-                  min={0}
-                  max={50}
-                  value={homePred}
-                  onChange={(e) => setHomePred(e.target.value)}
-                  disabled={selectedLocked}
-                  className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 disabled:opacity-50"
-                />
-              </div>
-
-              <div>
-                <div className="text-sm text-zinc-400">{(selected as any).awayTeam?.name ?? 'Visitante'}</div>
-                <input
-                  type="number"
-                  min={0}
-                  max={50}
-                  value={awayPred}
-                  onChange={(e) => setAwayPred(e.target.value)}
-                  disabled={selectedLocked}
-                  className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 disabled:opacity-50"
-                />
-              </div>
-            </div>
-
-            {((selected as any).phaseCode && (selected as any).phaseCode !== 'F01') &&
-            homePred.trim() !== '' &&
-            awayPred.trim() !== '' &&
-            Number(homePred) === Number(awayPred) ? (
-              <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-                <div className="text-sm text-zinc-300 font-medium">KO: ¿Quién avanza?</div>
-                <div className="text-xs text-zinc-400 mt-1">
-                  Como pronosticaste empate, debes elegir quién pasa a la siguiente fase.
+          <div className="w-full max-w-md">
+            <Card className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm text-[color:var(--muted)]">Pronóstico</div>
+                  <div className="text-lg font-semibold text-[var(--foreground)]">
+                    {(selected.homeTeam?.name ?? '')} vs {(selected.awayTeam?.name ?? '')}
+                  </div>
+                  <div className="text-sm text-[color:var(--muted)] mt-1">
+                    {(selected as any).dateKey ?? '—'} · {(selected as any).timeUtc ?? '—'} UTC
+                  </div>
                 </div>
 
-                <div className="mt-2 flex items-center gap-2">
-                  <select
-                    className="rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
-                    value={koWinnerTeamId}
-                    onChange={(e) => setKoWinnerTeamId(e.target.value)}
-                  >
-                    <option value="">— Selecciona —</option>
-                    <option value={(selected as any).homeTeam?.id}>{(selected as any).homeTeam?.name}</option>
-                    <option value={(selected as any).awayTeam?.id}>{(selected as any).awayTeam?.name}</option>
-                  </select>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setOpen(false);
+                    setSelected(null);
+                  }}
+                >
+                  X
+                </Button>
+              </div>
 
-                  <button
-                    type="button"
-                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
-                    onClick={() => setKoWinnerTeamId('')}
-                    title="Quitar selección"
-                  >
-                    Limpiar
-                  </button>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-sm text-[color:var(--muted)]">
+                    <TeamWithFlag
+                      name={selected.homeTeam?.name ?? ''}
+                      flagKey={(selected.homeTeam as any)?.flagKey ?? null}
+                      isPlaceholder={!!(selected.homeTeam as any)?.isPlaceholder}
+                    />
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={homePred}
+                    onChange={(e) => setHomePred(e.target.value)}
+                    disabled={selectedLocked}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                  />
                 </div>
+
+                <div>
+                  <div className="text-sm text-[color:var(--muted)]">
+                    <TeamWithFlag
+                      name={selected.awayTeam?.name ?? ''}
+                      flagKey={(selected.awayTeam as any)?.flagKey ?? null}
+                      isPlaceholder={!!(selected.awayTeam as any)?.isPlaceholder}
+                    />
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={awayPred}
+                    onChange={(e) => setAwayPred(e.target.value)}
+                    disabled={selectedLocked}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                  />
+                </div>
+
+                {((selected as any).phaseCode && (selected as any).phaseCode !== 'F01') &&
+                homePred.trim() !== '' &&
+                awayPred.trim() !== '' &&
+                Number(homePred) === Number(awayPred) ? (
+                  <Card className="mt-3 p-3 col-span-2">
+                    <div className="text-sm font-medium text-[var(--foreground)]">KO: ¿Quién avanza?</div>
+                    <div className="text-xs text-[color:var(--muted)] mt-1">
+                      Como pronosticaste empate, debes elegir quién pasa a la siguiente fase.
+                    </div>
+
+                    <div className="mt-2 flex items-center gap-2">
+                      <select
+                        className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+                        value={koWinnerTeamId}
+                        onChange={(e) => setKoWinnerTeamId(e.target.value)}
+                      >
+                        <option value="">— Selecciona —</option>
+                        <option value={selected.homeTeam.id}>{selected.homeTeam.name}</option>
+                        <option value={selected.awayTeam.id}>{selected.awayTeam.name}</option>
+                      </select>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setKoWinnerTeamId('')}
+                        title="Quitar selección"
+                      >
+                        Limpiar
+                      </Button>
+                    </div>
+                  </Card>
+                ) : null}
               </div>
-            ) : null}
 
-            {saveError && (
-              <div className="mt-3 rounded-lg border border-red-900 bg-red-950/50 p-2 text-sm text-red-200">
-                {saveError}
+              {selectedLocked && (
+                <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/30 p-2 text-sm text-amber-200">
+                  Este partido ya está cerrado. No puedes modificar tu pronóstico.
+                </div>
+              )}
+
+              {saveError && (
+                <div className="mt-3 rounded-lg border border-red-900 bg-red-950/50 p-2 text-sm text-red-200">
+                  {saveError}
+                </div>
+              )}
+
+              <div className="mt-4 flex justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setOpen(false);
+                    setSelected(null);
+                  }}
+                  disabled={saving}
+                >
+                  Cancelar
+                </Button>
+
+                <Button
+                  onClick={onSave}
+                  variant={selectedLocked ? 'outline' : 'primary'}
+                  size="sm"
+                  disabled={saving || selectedLocked}
+                >
+                  {selectedLocked ? 'Cerrado' : saving ? 'Guardando…' : 'Guardar'}
+                </Button>
               </div>
-            )}
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  setSelected(null);
-                }}
-                className="rounded-lg bg-zinc-800 px-3 py-2 hover:bg-zinc-700"
-                disabled={saving}
-              >
-                Cancelar
-              </button>
-
-              <button
-                onClick={onSave}
-                className="rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-black hover:bg-emerald-500 disabled:opacity-50"
-                disabled={saving || selectedLocked}
-              >
-                {selectedLocked ? 'Cerrado' : saving ? 'Guardando…' : 'Guardar'}
-              </button>
-            </div>
+            </Card>
           </div>
         </div>
       )}

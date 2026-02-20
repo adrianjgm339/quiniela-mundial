@@ -29,7 +29,10 @@ export class LeaguesService {
     return rows.map((r) => ({ ...r.league, myRole: r.role }));
   }
 
-  async createLeague(userId: string, input: { seasonId: string; name: string; scoringRuleId: string }) {
+  async createLeague(
+    userId: string,
+    input: { seasonId: string; name: string; scoringRuleId: string; joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL' },
+  ) {
     const name = (input.name || '').trim();
     const seasonId = (input.seasonId || '').trim();
 
@@ -57,6 +60,8 @@ export class LeaguesService {
         seasonId,
         name,
         joinCode,
+        joinPolicy: (input.joinPolicy as any) ?? 'PRIVATE',
+        inviteEnabled: true,
         createdById: userId,
         scoringRuleId,
         members: {
@@ -87,18 +92,39 @@ export class LeaguesService {
     const joinCode = (input.joinCode || '').trim().toUpperCase();
     if (!joinCode) throw new BadRequestException('joinCode is required');
 
-    const league = await this.prisma.league.findUnique({ where: { joinCode } });
-    if (!league) throw new NotFoundException('League not found');
+    const league = await this.prisma.league.findUnique({
+      where: { joinCode },
+      select: { id: true, seasonId: true, joinPolicy: true, inviteEnabled: true },
+    });
+    if (!league) throw new BadRequestException('Código inválido o expirado');
 
-    // upsert membership
+    if (league.inviteEnabled === false) {
+      throw new BadRequestException('Invitations are disabled for this league');
+    }
+
+    // bloqueamos altas cuando torneo inició (misma lógica que reglas)
+    await this.assertTournamentNotStarted(league.seasonId);
+
+    // Si la liga requiere aprobación: crear/actualizar solicitud en PENDING
+    if (league.joinPolicy === 'APPROVAL') {
+      const req = await this.prisma.leagueJoinRequest.upsert({
+        where: { leagueId_userId: { leagueId: league.id, userId } },
+        update: { status: 'PENDING', decidedAt: null, decidedById: null, reason: null },
+        create: { leagueId: league.id, userId, status: 'PENDING' },
+        select: { id: true, status: true },
+      });
+
+      return { ok: true, leagueId: league.id, pending: true, requestId: req.id };
+    }
+
+    // PRIVATE/PUBLIC por código => entra directo
     await this.prisma.leagueMember.upsert({
       where: { leagueId_userId: { leagueId: league.id, userId } },
-      update: { status: 'ACTIVE' }, // no tocamos role si ya existía
+      update: { status: 'ACTIVE' },
       create: { leagueId: league.id, userId, status: 'ACTIVE', role: 'MEMBER' },
     });
 
-
-    return { ok: true, leagueId: league.id };
+    return { ok: true, leagueId: league.id, pending: false };
   }
 
   async setActiveLeague(userId: string, leagueId: string) {
@@ -340,6 +366,183 @@ export class LeaguesService {
         role: true,
         status: true,
       },
+    });
+  }
+
+  async listPublicLeagues(userId: string, seasonId: string) {
+    const sid = (seasonId || '').trim();
+    if (!sid) throw new BadRequestException('seasonId is required');
+
+    // mostramos PUBLIC y APPROVAL; PRIVATE no aparece
+    const leagues = await this.prisma.league.findMany({
+      where: {
+        seasonId: sid,
+        joinPolicy: { in: ['PUBLIC', 'APPROVAL'] as any },
+      },
+      select: {
+        id: true,
+        name: true,
+        joinPolicy: true,
+        createdAt: true,
+        createdById: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    // memberCount (simple)
+    const counts = await this.prisma.leagueMember.groupBy({
+      by: ['leagueId'],
+      where: { leagueId: { in: leagues.map((l) => l.id) }, status: 'ACTIVE' },
+      _count: { leagueId: true },
+    });
+
+    const map = new Map(counts.map((c) => [c.leagueId, c._count.leagueId]));
+
+    // si ya soy miembro, marcamos
+    const my = await this.prisma.leagueMember.findMany({
+      where: { userId, leagueId: { in: leagues.map((l) => l.id) }, status: 'ACTIVE' },
+      select: { leagueId: true, role: true },
+    });
+    const myMap = new Map(my.map((m) => [m.leagueId, m.role]));
+
+    return leagues.map((l) => ({
+      ...l,
+      memberCount: map.get(l.id) ?? 0,
+      myRole: myMap.get(l.id) ?? null,
+    }));
+  }
+
+  async joinPublic(userId: string, leagueId: string) {
+    const league = await this.prisma.league.findUnique({
+      where: { id: leagueId },
+      select: { id: true, seasonId: true, joinPolicy: true },
+    });
+    if (!league) throw new NotFoundException('League not found');
+
+    await this.assertTournamentNotStarted(league.seasonId);
+
+    if (league.joinPolicy !== 'PUBLIC') {
+      throw new BadRequestException('League is not public');
+    }
+
+    await this.prisma.leagueMember.upsert({
+      where: { leagueId_userId: { leagueId: league.id, userId } },
+      update: { status: 'ACTIVE' },
+      create: { leagueId: league.id, userId, status: 'ACTIVE', role: 'MEMBER' },
+    });
+
+    return { ok: true, leagueId: league.id };
+  }
+
+  async listJoinRequests(userId: string, leagueId: string) {
+    await this.assertCanManageLeague(userId, leagueId);
+
+    const rows = await this.prisma.leagueJoinRequest.findMany({
+      where: { leagueId, status: 'PENDING' },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        user: { select: { id: true, email: true, displayName: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return rows.map((r) => ({
+      requestId: r.id,
+      userId: r.user.id,
+      email: r.user.email,
+      displayName: r.user.displayName,
+      status: r.status,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  async decideJoinRequest(
+    userId: string,
+    leagueId: string,
+    requestId: string,
+    input: { approve: boolean; reason?: string },
+  ) {
+    await this.assertCanManageLeague(userId, leagueId);
+
+    const req = await this.prisma.leagueJoinRequest.findUnique({
+      where: { id: requestId },
+      select: { id: true, leagueId: true, userId: true, status: true },
+    });
+    if (!req || req.leagueId !== leagueId) throw new NotFoundException('Join request not found');
+    if (req.status !== 'PENDING') throw new BadRequestException('Join request is not pending');
+
+    const nextStatus = input.approve ? 'APPROVED' : 'REJECTED';
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.leagueJoinRequest.update({
+        where: { id: req.id },
+        data: {
+          status: nextStatus as any,
+          decidedAt: new Date(),
+          decidedById: userId,
+          reason: (input.reason || '').trim() || null,
+        },
+      });
+
+      if (input.approve) {
+        await tx.leagueMember.upsert({
+          where: { leagueId_userId: { leagueId, userId: req.userId } },
+          update: { status: 'ACTIVE' },
+          create: { leagueId, userId: req.userId, status: 'ACTIVE', role: 'MEMBER' },
+        });
+      }
+    });
+
+    return { ok: true };
+  }
+
+  async getLeagueAccessSettings(userId: string, leagueId: string) {
+    // solo miembro puede ver settings básicos; solo admin/owner cambiará luego (en el front lo bloqueamos)
+    const m = await this.prisma.leagueMember.findUnique({
+      where: { leagueId_userId: { leagueId, userId } },
+      select: { status: true },
+    });
+    if (!m || m.status !== 'ACTIVE') throw new ForbiddenException('Not a member of this league');
+
+    const league = await this.prisma.league.findUnique({
+      where: { id: leagueId },
+      select: { id: true, joinCode: true, joinPolicy: true, inviteEnabled: true, seasonId: true },
+    });
+    if (!league) throw new NotFoundException('League not found');
+
+    return league;
+  }
+
+  async updateLeagueAccessSettings(
+    userId: string,
+    leagueId: string,
+    input: { joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL'; inviteEnabled?: boolean; rotateCode?: boolean },
+  ) {
+    await this.assertCanManageLeague(userId, leagueId);
+
+    const league = await this.prisma.league.findUnique({
+      where: { id: leagueId },
+      select: { id: true, seasonId: true },
+    });
+    if (!league) throw new NotFoundException('League not found');
+
+    await this.assertTournamentNotStarted(league.seasonId);
+
+    const data: any = {};
+    if (typeof input.inviteEnabled === 'boolean') data.inviteEnabled = input.inviteEnabled;
+    if (input.joinPolicy) data.joinPolicy = input.joinPolicy as any;
+
+    if (input.rotateCode) {
+      data.joinCode = Math.random().toString(36).slice(2, 8).toUpperCase();
+    }
+
+    return this.prisma.league.update({
+      where: { id: leagueId },
+      data,
+      select: { id: true, joinCode: true, joinPolicy: true, inviteEnabled: true },
     });
   }
 

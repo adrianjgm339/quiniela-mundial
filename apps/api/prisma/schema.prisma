@@ -24,6 +24,19 @@ enum LeagueMemberRole {
   MEMBER
 }
 
+enum LeagueJoinPolicy {
+  PUBLIC // visible y se puede unir directo
+  PRIVATE // solo con código
+  APPROVAL // visible, pero requiere aprobación
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELED
+}
+
 enum MatchStatus {
   SCHEDULED
   LIVE
@@ -58,6 +71,7 @@ model User {
 
   leaguesCreated League[]
   memberships    LeagueMember[]
+  joinRequests   LeagueJoinRequest[]
   picks          Pick[]
   countryCode    String? // ej: "VE", "US", "MX"
 }
@@ -138,19 +152,23 @@ model SeasonTranslation {
 }
 
 model League {
-  id          String   @id @default(uuid())
-  seasonId    String
-  name        String
-  joinCode    String   @unique // para unirse
+  id            String           @id @default(uuid())
+  seasonId      String
+  name          String
+  joinCode      String           @unique // para unirse
+  joinPolicy    LeagueJoinPolicy @default(PRIVATE)
+  inviteEnabled Boolean          @default(true)
+
   createdById String
   createdAt   DateTime @default(now())
 
-  season        Season         @relation(fields: [seasonId], references: [id])
-  createdBy     User           @relation(fields: [createdById], references: [id])
+  season        Season              @relation(fields: [seasonId], references: [id])
+  createdBy     User                @relation(fields: [createdById], references: [id])
   members       LeagueMember[]
+  joinRequests  LeagueJoinRequest[]
   picks         Pick[]
   scoringRuleId String?
-  scoringRule   ScoringRule?   @relation(fields: [scoringRuleId], references: [id])
+  scoringRule   ScoringRule?        @relation(fields: [scoringRuleId], references: [id])
 }
 
 model LeagueMember {
@@ -165,6 +183,24 @@ model LeagueMember {
   user   User   @relation(fields: [userId], references: [id])
 
   @@unique([leagueId, userId])
+}
+
+model LeagueJoinRequest {
+  id       String            @id @default(cuid())
+  leagueId String
+  userId   String
+  status   JoinRequestStatus @default(PENDING)
+
+  createdAt   DateTime  @default(now())
+  decidedAt   DateTime?
+  decidedById String?
+  reason      String?
+
+  league League @relation(fields: [leagueId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([leagueId, userId])
+  @@index([leagueId, status])
 }
 
 model Team {

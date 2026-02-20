@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { TeamWithFlag } from "@/components/team-with-flag";
 import { useParams, useRouter } from "next/navigation";
 import { me } from "@/lib/api";
 
@@ -56,7 +59,50 @@ type BracketSlotsResponse = {
     meta?: any;
 };
 
+type CatalogSport = {
+    id: string;
+    name: string;
+    competitions: Array<{
+        id: string;
+        name: string;
+        seasons: Array<{ id: string; name: string }>;
+    }>;
+};
+
+function inferSportCompetitionFromSeason(cat: CatalogSport[], seasonId: string) {
+    for (const s of cat ?? []) {
+        for (const c of s.competitions ?? []) {
+            const found = (c.seasons ?? []).some((se) => se.id === seasonId);
+            if (found) return { sportId: s.id, competitionId: c.id };
+        }
+    }
+    return { sportId: "", competitionId: "" };
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
+
+const controlBase =
+    "h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--foreground)] outline-none " +
+    "placeholder:text-[var(--muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
+
+const controlSelect = controlBase + " pr-9";
+const controlInput = controlBase;
+
+const controlClickable =
+    "rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 hover:bg-[var(--muted)] " +
+    "disabled:opacity-60 disabled:cursor-not-allowed";
+
+const tableWrap = "overflow-x-auto";
+const tableBase = "w-full border-collapse text-sm";
+const trHead = "text-left border-b border-[var(--border)]";
+const thBase = "py-2 px-2 text-xs font-semibold text-[var(--muted)]";
+const tdBase = "py-2 px-2 align-middle";
+
+async function fetchCatalog(locale: string): Promise<CatalogSport[]> {
+    const res = await fetch(`${API_BASE}/catalog?locale=${encodeURIComponent(locale)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+}
 
 async function apiFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -145,6 +191,13 @@ export default function AdminGroupsPage() {
 
     const [user, setUser] = useState<User | null>(null);
     const [token, setToken] = useState<string | null>(null);
+
+    // Contexto (Deporte → Competición → Evento)
+    const [catalog, setCatalog] = useState<CatalogSport[]>([]);
+    const [sportId, setSportId] = useState<string>("");
+    const [competitionId, setCompetitionId] = useState<string>("");
+    const [seasonId, setSeasonId] = useState<string>(""); // evento seleccionado en esta pantalla
+    const [seasonLabel, setSeasonLabel] = useState<string>(""); // label desde catálogo (no depende de /me)
 
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState<string | null>(null);
@@ -360,31 +413,41 @@ export default function AdminGroupsPage() {
         return used;
     }, [bracketSlots]);
 
-    async function loadAll(tok: string) {
+    async function loadAll(tok: string, forcedSeasonId?: string) {
         setError(null);
         setLastOk(null);
         setLoading(true);
 
         try {
+            const sid =
+                forcedSeasonId ||
+                seasonId ||
+                (standingsRaw as any)?.seasonId ||
+                (thirdsRaw as any)?.seasonId ||
+                user?.activeSeasonId ||
+                "";
+
+            const qs = sid ? `?seasonId=${encodeURIComponent(sid)}` : "";
+
             const [s, t] = await Promise.all([
-                apiFetch<StandingsResponse>(`/admin/groups/standings`, tok),
-                apiFetch<ThirdsResponse>(`/admin/groups/thirds`, tok),
+                apiFetch<StandingsResponse>(`/admin/groups/standings${qs}`, tok),
+                apiFetch<ThirdsResponse>(`/admin/groups/thirds${qs}`, tok),
             ]);
 
             setStandingsRaw(s);
             setThirdsRaw(t);
 
-            const seasonId = s?.seasonId ?? t?.seasonId ?? user?.activeSeasonId ?? "";
+            const sidResolved = s?.seasonId ?? t?.seasonId ?? user?.activeSeasonId ?? "";
 
             // Importante: bracket NO debe tumbar toda la carga si falla.
             // Además, si el back indica bracket deshabilitado (ej: béisbol), no lo pedimos.
             const f = (s as any)?.meta ?? (t as any)?.meta ?? null;
             const bracketOk = f?.bracketR32Enabled !== false;
 
-            if (seasonId && bracketOk) {
+            if (sidResolved && bracketOk) {
                 try {
                     const b = await apiFetch<BracketSlotsResponse>(
-                        `/admin/groups/bracket-slots?seasonId=${encodeURIComponent(seasonId)}`,
+                        `/admin/groups/bracket-slots?seasonId=${encodeURIComponent(sidResolved)}`,
                         tok
                     );
                     setBracketRaw(b);
@@ -403,6 +466,16 @@ export default function AdminGroupsPage() {
         }
     }
 
+    function getCtxSeasonId() {
+        return (
+            seasonId ||
+            standingsRaw?.seasonId ||
+            thirdsRaw?.seasonId ||
+            user?.activeSeasonId ||
+            ""
+        );
+    }
+
     async function closeGroups() {
         if (!token) return;
         setBusy("Cerrando fase de grupos...");
@@ -410,7 +483,7 @@ export default function AdminGroupsPage() {
         setLastOk(null);
 
         try {
-            const seasonId = standingsRaw?.seasonId ?? thirdsRaw?.seasonId ?? user?.activeSeasonId ?? "";
+            const seasonId = getCtxSeasonId();
             if (!seasonId) {
                 alert("No se pudo detectar seasonId.");
                 return;
@@ -421,7 +494,7 @@ export default function AdminGroupsPage() {
                 body: JSON.stringify({}),
             });
             setLastOk("Fase de grupos cerrada. Re-cargando datos...");
-            await loadAll(token);
+            await loadAll(token, seasonId);
         } catch (e: any) {
             setError(e?.message ?? "Error cerrando fase de grupos");
         } finally {
@@ -432,7 +505,7 @@ export default function AdminGroupsPage() {
     async function resolveKoPlaceholders() {
         if (!token) return;
 
-        const seasonId = standingsRaw?.seasonId ?? thirdsRaw?.seasonId ?? user?.activeSeasonId ?? "";
+        const seasonId = getCtxSeasonId();
         if (!seasonId) {
             alert("No se pudo detectar seasonId.");
             return;
@@ -449,7 +522,7 @@ export default function AdminGroupsPage() {
                 { method: "POST", body: JSON.stringify({}) }
             );
             setLastOk("Placeholders KO reaplicados. Re-cargando datos...");
-            await loadAll(token);
+            await loadAll(token, seasonId);
         } catch (e: any) {
             setError(e?.message ?? "Error reaplicando placeholders KO");
         } finally {
@@ -460,7 +533,7 @@ export default function AdminGroupsPage() {
     async function applyBracketSlot(matchNo: number, slot: "HOME" | "AWAY", teamId: string | null) {
         if (!token) return;
 
-        const seasonId = standingsRaw?.seasonId ?? thirdsRaw?.seasonId ?? user?.activeSeasonId ?? "";
+        const seasonId = getCtxSeasonId();
         if (!seasonId) {
             alert("No se pudo detectar seasonId.");
             return;
@@ -483,7 +556,7 @@ export default function AdminGroupsPage() {
             });
 
             setLastOk("Slot actualizado.");
-            await loadAll(token);
+            await loadAll(token, seasonId);
         } catch (e: any) {
             setError(e?.message ?? "Error guardando slot");
         } finally {
@@ -501,7 +574,7 @@ export default function AdminGroupsPage() {
     async function applyManualGroupOrder(groupCode: string) {
         if (!token) return;
 
-        const seasonId = standingsRaw?.seasonId ?? user?.activeSeasonId ?? "";
+        const seasonId = getCtxSeasonId();
         const orderedTeamIds = parseIds(manualGroupText);
 
         if (!seasonId) {
@@ -534,7 +607,7 @@ export default function AdminGroupsPage() {
             setOpenManualGroup(null);
             setManualGroupText("");
             setManualGroupReason("");
-            await loadAll(token);
+            await loadAll(token, seasonId);
         } catch (e: any) {
             setError(e?.message ?? "Error aplicando manual del grupo");
         } finally {
@@ -545,7 +618,7 @@ export default function AdminGroupsPage() {
     async function applyManualThirds(qualifiedTeamIdsOverride?: string[]) {
         if (!token) return;
 
-        const seasonId = thirdsRaw?.seasonId ?? standingsRaw?.seasonId ?? user?.activeSeasonId ?? "";
+        const seasonId = getCtxSeasonId();
         const qualifiedTeamIds =
             qualifiedTeamIdsOverride && qualifiedTeamIdsOverride.length ? qualifiedTeamIdsOverride : parseIds(manualThirdsText);
 
@@ -577,7 +650,7 @@ export default function AdminGroupsPage() {
             setManualThirdsSelected({});
             setManualThirdsText("");
             setManualThirdsReason("");
-            await loadAll(token);
+            await loadAll(token, seasonId);
         } catch (e: any) {
             setError(e?.message ?? "Error aplicando manual de terceros");
         } finally {
@@ -594,14 +667,50 @@ export default function AdminGroupsPage() {
         setToken(tok);
 
         me(tok, locale)
-            .then((u: User) => {
+            .then(async (u: User) => {
                 if (u?.role !== "ADMIN") {
                     router.replace(`/${locale}/dashboard`);
                     return;
                 }
+
                 setUser(u);
                 if (u?.countryCode) localStorage.setItem("countryCode", u.countryCode);
-                loadAll(tok);
+
+                try {
+                    // 1) Catálogo para cascada
+                    const cat = await fetchCatalog(locale);
+                    setCatalog(cat);
+
+                    // 2) Season inicial: preferimos localStorage (admin_ctx_seasonId), si no /me.activeSeasonId
+                    const lsSeasonId = localStorage.getItem("admin_ctx_seasonId") ?? "";
+                    const sid = lsSeasonId || (u?.activeSeasonId ?? "") || "";
+
+                    setSeasonId(sid);
+
+                    if (sid) {
+                        const inferred = inferSportCompetitionFromSeason(cat, sid);
+                        setSportId(inferred.sportId);
+                        setCompetitionId(inferred.competitionId);
+
+                        const nm =
+                            cat
+                                .find((s) => s.id === inferred.sportId)
+                                ?.competitions?.find((c) => c.id === inferred.competitionId)
+                                ?.seasons?.find((se) => se.id === sid)
+                                ?.name ?? "";
+
+                        setSeasonLabel(nm);
+                    } else {
+                        setSportId("");
+                        setCompetitionId("");
+                        setSeasonLabel("");
+                    }
+
+                    await loadAll(tok, sid || undefined);
+                } catch (e: any) {
+                    setError(e?.message ?? "Error cargando catálogo/contexto");
+                    await loadAll(tok); // fallback: igual intenta cargar con lo que haya
+                }
             })
             .catch((err) => {
                 setError(err?.message ?? "Error");
@@ -701,81 +810,67 @@ export default function AdminGroupsPage() {
     }, [thirdsCutMeta.needs, lockedOk, selectedThirdsCount, selectedTieCount, thirdsCutMeta.slotsLeft]);
 
     return (
-        <div style={{ maxWidth: 980, margin: "40px auto", padding: 16, paddingRight: 36 }}>
+        <div className="mx-auto max-w-[980px] px-4 pb-12 pt-10">
             {/* Leyenda de colores (sticky) */}
-            <div
-                style={{
-                    position: "sticky",
-                    top: 10,
-                    zIndex: 30,
-                    marginTop: 14,
-                    marginBottom: 12,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "rgba(0,0,0,0.55)",
-                    backdropFilter: "blur(6px)",
-                }}
-            >
-                <div style={{ fontWeight: 800, marginBottom: 8 }}>Clasificados o candidatos a clasificar</div>
+            <Card className="sticky top-3 z-30 mb-3 mt-3 p-3">
+                <div className="font-extrabold mb-2">Clasificados o candidatos a clasificar</div>
 
-                <div style={{ display: "grid", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="grid gap-2 text-sm">
+                    <div className="flex items-center gap-3">
                         <div
+                            className="h-[14px] w-[22px] rounded"
                             style={{
-                                width: 22,
-                                height: 14,
-                                borderRadius: 4,
-                                background: "rgba(16,185,129,0.22)",
-                                border: "1px solid rgba(16,185,129,0.35)",
+                                background: "var(--qualify-direct-bg)",
+                                border: "1px solid var(--qualify-direct-border)",
                             }}
                         />
-                        <div style={{ fontSize: 13, opacity: 0.9 }}>
+                        <div className="text-[var(--foreground)]/90">
                             <b>Verde</b>: Clasifica directo (1º y 2º del grupo)
                         </div>
                     </div>
 
                     {thirdsEnabled && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div className="flex items-center gap-3">
                             <div
+                                className="h-[14px] w-[22px] rounded"
                                 style={{
-                                    width: 22,
-                                    height: 14,
-                                    borderRadius: 4,
-                                    background: "rgba(250,204,21,0.22)",
-                                    border: "1px solid rgba(250,204,21,0.35)",
+                                    background: "var(--qualify-third-bg)",
+                                    border: "1px solid var(--qualify-third-border)",
                                 }}
                             />
-                            <div style={{ fontSize: 13, opacity: 0.9 }}>
+                            <div className="text-[var(--foreground)]/90">
                                 <b>Amarillo</b>: 3º puesto candidato a clasificar (top 8 mejores terceros)
                             </div>
                         </div>
                     )}
                 </div>
-            </div>
+            </Card>
 
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div className="mt-4 flex items-start justify-between gap-3 flex-wrap">
                 <div>
-                    <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Admin · Fase de Grupos</h1>
-                    <div style={{ marginTop: 4, fontSize: 13, opacity: 0.75 }}>{user?.activeSeason?.name ?? "Evento activo: (no seleccionado)"}</div>
+                    <h1 className="m-0 text-2xl font-bold">Admin · Fase de Grupos</h1>
+                    <div className="mt-1 text-sm text-[var(--muted)]">
+                        {user?.activeSeason?.name ?? "Evento activo: (no seleccionado)"}
+                    </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <Link href={`/${locale}/admin`} className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700">
+                <div className="w-full md:w-auto flex flex-wrap gap-2 justify-end items-center">
+                    <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/admin`)}>
                         Volver a Admin
-                    </Link>
+                    </Button>
 
-                    <button
-                        type="button"
+                    <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => token && loadAll(token)}
                         disabled={!token || loading || !!busy}
-                        className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
                     >
                         Refrescar
-                    </button>
+                    </Button>
 
-                    <button
-                        type="button"
+                    <Button
+                        size="sm"
+                        variant="secondary"
                         onClick={() => {
                             if (!closeInfo.canClose) {
                                 alert(closeInfo.msg);
@@ -793,113 +888,204 @@ export default function AdminGroupsPage() {
                             }
                         }}
                         disabled={!token || loading || !!busy || !closeInfo.canClose}
-                        className="px-3 py-2 rounded-lg bg-red-900 hover:bg-red-800 disabled:opacity-60"
+                        className="border border-[var(--destructive)]/40 text-[var(--destructive)] bg-[var(--destructive)]/12 hover:bg-[var(--destructive)]/18 disabled:bg-[var(--destructive)]/10 disabled:text-[var(--destructive)]/70 disabled:border-[var(--destructive)]/25"
                     >
                         Cerrar fase de grupos
-                    </button>
+                    </Button>
 
-                    <button
-                        type="button"
+                    <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => {
                             if (!confirm("¿Reaplicar placeholders KO? Esto intentará resolver equipos en fases KO usando standings actuales.")) return;
                             resolveKoPlaceholders();
                         }}
                         disabled={!token || loading || !!busy}
-                        className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
                     >
                         Reaplicar placeholders KO
-                    </button>
+                    </Button>
 
-                    <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>{closeInfo.msg}</div>
+                    <div className="w-full text-xs text-[var(--muted)] mt-2">{closeInfo.msg}</div>
                 </div>
             </div>
 
-            {(loading || busy) && <div style={{ marginTop: 14, opacity: 0.8 }}>{busy ?? "Cargando..."}</div>}
+            {(loading || busy) && <div className="mt-4 text-sm text-[var(--muted)]">{busy ?? "Cargando..."}</div>}
 
             {error && (
-                <div style={{ marginTop: 16, background: "#ffe5e5", color: "#000", padding: 10, borderRadius: 8 }}>
-                    {error}
-                </div>
+                <Card className="mt-4 p-3" data-surface="strong">
+                    <div className="text-sm text-[var(--destructive)]">{error}</div>
+                </Card>
             )}
 
             {lastOk && !error && (
-                <div style={{ marginTop: 16, background: "#e7ffe5", color: "#000", padding: 10, borderRadius: 8 }}>
-                    {lastOk}
+                <Card className="mt-4 p-3">
+                    <div className="text-sm">{lastOk}</div>
+                </Card>
+            )}
+
+            {/* Contexto (Deporte → Competición → Evento) */}
+            <Card className="mt-3 p-3">
+                <div className="text-sm font-extrabold text-[var(--foreground)]/90">Contexto</div>
+
+                <div className="mt-3 grid gap-3">
+                    {/* Deporte */}
+                    <div className="grid gap-1.5">
+                        <div className="text-sm text-[var(--muted)]">Deporte:</div>
+                        <select
+                            value={sportId}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setSportId(v);
+                                setCompetitionId("");
+                                setSeasonId("");
+                                setSeasonLabel("");
+                            }}
+                            className={controlSelect}
+                        >
+                            <option value="">Seleccionar…</option>
+                            {catalog.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                    {s.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Competición */}
+                    <div className="grid gap-1.5">
+                        <div className="text-sm text-[var(--muted)]">Competición:</div>
+                        <select
+                            value={competitionId}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setCompetitionId(v);
+                                setSeasonId("");
+                                setSeasonLabel("");
+                            }}
+                            disabled={!sportId}
+                            className={controlSelect}
+                        >
+                            <option value="">Seleccionar…</option>
+                            {(catalog.find((s) => s.id === sportId)?.competitions ?? []).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                    {c.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Evento */}
+                    <div className="grid gap-1.5">
+                        <div className="text-sm text-[var(--muted)]">Evento:</div>
+                        <select
+                            value={seasonId}
+                            onChange={async (e) => {
+                                const next = e.target.value;
+                                setSeasonId(next);
+
+                                // Persistimos contexto local (igual que /admin/results)
+                                if (next) localStorage.setItem("admin_ctx_seasonId", next);
+                                else localStorage.removeItem("admin_ctx_seasonId");
+
+                                const nm =
+                                    catalog
+                                        .find((s) => s.id === sportId)
+                                        ?.competitions?.find((c) => c.id === competitionId)
+                                        ?.seasons?.find((se) => se.id === next)
+                                        ?.name ?? "";
+
+                                setSeasonLabel(nm);
+
+                                if (token) {
+                                    await loadAll(token, next || undefined);
+                                }
+                            }}
+                            disabled={!sportId || !competitionId}
+                            className={controlSelect}
+                        >
+                            <option value="">Seleccionar…</option>
+                            {(
+                                catalog
+                                    .find((s) => s.id === sportId)
+                                    ?.competitions?.find((c) => c.id === competitionId)
+                                    ?.seasons ?? []
+                            ).map((se) => (
+                                <option key={se.id} value={se.id}>
+                                    {se.name}
+                                </option>
+                            ))}
+                        </select>
+
+                        <div className="mt-1.5 text-xs text-[var(--muted)]">
+                            Evento seleccionado: <b>{seasonLabel || "(no seleccionado)"}</b>
+                        </div>
+                    </div>
                 </div>
+            </Card>
+
+            {(loading || busy) && (
+                <div className="mt-4 text-sm text-[var(--muted)]">{busy ?? "Cargando..."}</div>
+            )}
+
+            {error && (
+                <Card className="mt-4 p-3" data-surface="strong">
+                    <div className="text-sm text-[var(--destructive)]">{error}</div>
+                </Card>
+            )}
+
+            {lastOk && !error && (
+                <Card className="mt-4 p-3">
+                    <div className="text-sm">{lastOk}</div>
+                </Card>
             )}
 
             {/* STANDINGS */}
-            <div
-                style={{
-                    marginTop: 18,
-                    padding: 12,
-                    paddingLeft: 16,
-                    paddingRight: 16,
-                    border: "1px solid #ddd",
-                    borderRadius: 10,
-                    overflowX: "hidden",
-                    overflowY: "visible",
-                    boxSizing: "border-box",
-                }}
-            >
-                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-                    <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Standings por Grupo</h2>
-                    <div style={{ fontSize: 12, opacity: 0.7 }}>seasonId: {standingsRaw?.seasonId ?? user?.activeSeasonId ?? "(?)"}</div>
+            <Card className="mt-4 p-4 overflow-x-hidden overflow-y-visible box-border">
+                <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                    <h2 className="m-0 text-base font-bold">Standings por Grupo</h2>
+                    <div className="text-xs text-[var(--muted)]">
+                        seasonId: {standingsRaw?.seasonId ?? user?.activeSeasonId ?? "(?)"}
+                    </div>
                 </div>
 
                 {groups.length === 0 && !loading && (
-                    <div style={{ marginTop: 10, opacity: 0.8 }}>
+                    <div className="mt-3 text-sm text-[var(--muted)]">
                         No hay standings para mostrar (¿ya hay resultados cargados? ¿ya ejecutaste “Cerrar fase de grupos”?).
                     </div>
                 )}
 
                 {/* ✅ Segmentación tipo Excel (multi-select) */}
                 {groupCodes.length > 0 && (
-                    <div
-                        style={{
-                            marginTop: 12,
-                            padding: 12,
-                            border: "1px solid rgba(255,255,255,0.14)",
-                            borderRadius: 12,
-                            background: "rgba(24,24,27,0.85)",
-                        }}
-                    >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                            <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.9 }}>
-                                Grupo <span style={{ fontWeight: 600, opacity: 0.75 }}>(multi-select)</span>
+                    <Card className="mt-3 p-3">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="text-xs font-extrabold opacity-90">
+                                Grupo <span className="font-semibold opacity-70">(multi-select)</span>
                             </div>
 
-                            <div style={{ fontSize: 12, opacity: 0.75 }}>
+                            <div className="text-xs text-[var(--muted)]">
                                 Seleccionados: <b>{groupFilterSet.size === 0 ? "ALL" : groupFilterSet.size}</b>
                             </div>
                         </div>
 
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-                            <button
-                                type="button"
+                        <div className="flex flex-wrap gap-2 mt-3">
+                            <Button
+                                size="sm"
+                                variant={groupFilterSet.size === 0 ? "primary" : "secondary"}
                                 onClick={() => setGroupFilterSet(new Set())}
-                                style={{
-                                    padding: "8px 12px",
-                                    borderRadius: 10,
-                                    border: "1px solid rgba(9, 207, 85, 0.25)",
-                                    background: groupFilterSet.size === 0 ? "rgba(34,197,94,0.95)" : "rgba(24,24,27,0.85)",
-                                    color: "white",
-                                    fontWeight: 800,
-                                    fontSize: 13,
-                                    lineHeight: "10px",
-                                }}
                             >
                                 ALL
-                            </button>
+                            </Button>
 
                             {groupCodes.map((code) => {
                                 const selected = groupFilterSet.has(code);
 
                                 return (
-                                    <button
+                                    <Button
                                         key={code}
-                                        type="button"
+                                        size="sm"
+                                        variant={selected ? "primary" : "secondary"}
                                         title="Click: toggle · Shift+Click: solo este"
+                                        className="min-w-[40px] justify-center"
                                         onClick={(e) => {
                                             if ((e as any).shiftKey) {
                                                 setGroupFilterSet(new Set([code]));
@@ -913,51 +1099,24 @@ export default function AdminGroupsPage() {
                                                 return next;
                                             });
                                         }}
-                                        style={{
-                                            minWidth: 40,
-                                            padding: "6px 8px",
-                                            borderRadius: 10,
-                                            border: "1px solid rgba(9, 207, 85, 0.25)",
-                                            background: selected ? "rgba(34,197,94,0.95)" : "rgba(24,24,27,0.85)",
-                                            color: "white",
-                                            fontWeight: 800,
-                                            boxShadow: selected ? "0 0 0 2px rgba(34,197,94,0.16) inset" : "none",
-                                            cursor: "pointer",
-                                            fontSize: 13,
-                                            lineHeight: "10px",
-                                        }}
                                     >
                                         {code}
-                                    </button>
+                                    </Button>
                                 );
                             })}
 
-                            <button
-                                type="button"
-                                onClick={() => setGroupFilterSet(new Set())}
-                                style={{
-                                    padding: "8px 12px",
-                                    borderRadius: 10,
-                                    border: "1px solid rgba(255,255,255,0.14)",
-                                    background: "rgba(24,24,27,0.85)",
-                                    color: "white",
-                                    fontWeight: 800,
-                                    marginLeft: 6,
-                                    opacity: 0.9,
-                                }}
-                                title="Volver a ALL"
-                            >
+                            <Button size="sm" variant="outline" onClick={() => setGroupFilterSet(new Set())} title="Volver a ALL">
                                 Limpiar
-                            </button>
+                            </Button>
                         </div>
 
-                        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                        <div className="mt-3 text-xs text-[var(--muted)]">
                             Tip: <b>Shift+Click</b> = dejar solo 1 grupo (como Excel). Click normal = seleccionar varios.
                         </div>
-                    </div>
+                    </Card>
                 )}
 
-                <div style={{ display: "grid", gap: 14, marginTop: 12 }}>
+                <div className="mt-3 grid gap-4">
                     {visibleGroups.map((g: any) => {
                         const groupCode = safeText(g.groupCode ?? "??");
                         const rows: AnyObj[] = Array.isArray(g.standings) ? g.standings : [];
@@ -994,22 +1153,14 @@ export default function AdminGroupsPage() {
                                 : "OK";
 
                         return (
-                            <div key={groupCode} style={{ paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
-                                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                                    <div style={{ fontSize: 14, fontWeight: 700 }}>Grupo {groupCode}</div>
-                                    <div style={{ fontSize: 12, opacity: 0.7, textAlign: "right", maxWidth: 320, whiteSpace: "normal" }}>{headerRight}</div>
+                            <div key={groupCode} className="pt-3 border-t border-[var(--border)]">
+                                <div className="flex items-baseline justify-between gap-3">
+                                    <div className="text-sm font-bold">Grupo {groupCode}</div>
+                                    <div className="text-xs text-[var(--muted)] text-right max-w-[320px] whitespace-normal">{headerRight}</div>
                                 </div>
 
-                                <div
-                                    style={{
-                                        overflowX: "auto",
-                                        marginTop: 8,
-                                        paddingLeft: 10,
-                                        paddingRight: 0,
-                                        boxSizing: "border-box",
-                                    }}
-                                >
-                                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+                                <div className={`${tableWrap} mt-2`}>
+                                    <table className={`${tableBase} table-fixed`}>
                                         <colgroup>
                                             {[
                                                 <col key="pos" style={{ width: 52 }} />,   // Pos
@@ -1020,8 +1171,8 @@ export default function AdminGroupsPage() {
                                             ]}
                                         </colgroup>
                                         <thead>
-                                            <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-                                                <th style={{ padding: "6px 8px" }}>Pos</th>
+                                            <tr className="text-left border-b border-[var(--border)]">
+                                                <th className={thBase}>Pos</th>
                                                 <th style={{ padding: "6px 8px" }}>Equipo</th>
                                                 {columns.map((c) => (
                                                     <th key={c.key} style={{ padding: "6px 8px" }}>
@@ -1029,7 +1180,7 @@ export default function AdminGroupsPage() {
                                                     </th>
                                                 ))}
                                                 <th style={{ padding: "6px 8px" }}>Manual</th>
-                                                <th style={{ padding: "6px 0" }} />
+                                                <th className="py-2 px-0" />
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -1044,20 +1195,30 @@ export default function AdminGroupsPage() {
                                                 const isQualifiedAsThird = thirdsEnabled && isGroupStageComplete && pos === 3 && tid && qualifiedThirdIds.has(tid);
 
                                                 const rowBg = isQualifiedDirect
-                                                    ? "rgba(16,185,129,0.12)"
+                                                    ? "var(--qualify-direct-bg)"
                                                     : isQualifiedAsThird
-                                                        ? "rgba(250,204,21,0.14)"
+                                                        ? "var(--qualify-third-bg)"
                                                         : undefined;
+
+                                                const rowBorder = isQualifiedDirect
+                                                    ? "1px solid var(--qualify-direct-border)"
+                                                    : isQualifiedAsThird
+                                                        ? "1px solid var(--qualify-third-border)"
+                                                        : "1px solid var(--border)";
 
                                                 return (
                                                     <tr
                                                         key={safeText(r.teamId ?? idx)}
-                                                        style={{
-                                                            borderBottom: "1px solid rgba(255,255,255,0.08)",
-                                                        }}
+                                                        style={{ borderBottom: rowBorder }}
                                                     >
-                                                        <td style={{ padding: "6px 8px", background: rowBg }}>{safeText(r.posGroup ?? idx + 1)}</td>
-                                                        <td style={{ padding: "6px 8px", fontWeight: 600, background: rowBg }}>{teamName}</td>
+                                                        <td className={tdBase} style={{ background: rowBg }}>{safeText(r.posGroup ?? idx + 1)}</td>
+                                                        <td style={{ padding: "6px 8px", fontWeight: 600, background: rowBg }}>
+                                                            <TeamWithFlag
+                                                                name={teamName}
+                                                                flagKey={r.team?.flagKey ?? (r as any).flagKey ?? null}
+                                                                isPlaceholder={!!r.team?.isPlaceholder}
+                                                            />
+                                                        </td>
                                                         {columns.map((c) => {
                                                             const val =
                                                                 c.key === "winPct"
@@ -1095,19 +1256,20 @@ export default function AdminGroupsPage() {
                                 </div>
 
                                 {needsManualGroup && (
-                                    <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10 }}>
+                                    <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
                                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                                             <div style={{ fontSize: 13, fontWeight: 700, flex: "1 1 auto", minWidth: 0, whiteSpace: "normal" }}>
                                                 Desempate manual requerido (Grupo {groupCode})
                                             </div>
 
-                                            <button
+                                            <Button
                                                 type="button"
-                                                style={{ flexShrink: 0 }}
+                                                size="sm"
+                                                variant="secondary"
                                                 className={
                                                     openManualGroup === groupCode
-                                                        ? "px-3 py-2 rounded-lg bg-red-700 hover:bg-red-600"
-                                                        : "px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600"
+                                                        ? "bg-red-600 hover:bg-red-500 text-white border-transparent"
+                                                        : "bg-green-600 hover:bg-green-500 text-white border-transparent"
                                                 }
                                                 onClick={() => {
                                                     const willOpen = openManualGroup !== groupCode;
@@ -1132,12 +1294,12 @@ export default function AdminGroupsPage() {
                                                 }}
                                             >
                                                 {openManualGroup === groupCode ? "Cerrar" : "Abrir manual"}
-                                            </button>
+                                            </Button>
                                         </div>
 
                                         {openManualGroup === groupCode && (
                                             <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                                                <div style={{ fontSize: 12, opacity: 0.8 }}>Reordena con las flechas el orden final (1→4). Luego aplica.</div>
+                                                <div className="text-xs text-[var(--muted)]">Reordena con las flechas el orden final (1→4). Luego aplica.</div>
 
                                                 <div style={{ display: "grid", gap: 8 }}>
                                                     {manualGroupRows.map((row: any, i: number) => {
@@ -1153,79 +1315,62 @@ export default function AdminGroupsPage() {
                                                         return (
                                                             <div
                                                                 key={row.teamId || i}
-                                                                style={{
-                                                                    display: "grid",
-                                                                    gridTemplateColumns: "44px 1fr 110px",
-                                                                    gap: 10,
-                                                                    alignItems: "center",
-                                                                    padding: "10px 12px",
-                                                                    borderRadius: 10,
-                                                                    border: "1px solid rgba(255,255,255,0.12)",
-                                                                    background: canMove ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.04)",
-                                                                    opacity: canMove ? 1 : 0.85,
-                                                                }}
+                                                                className={
+                                                                    "grid grid-cols-[44px_1fr_110px] items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 " +
+                                                                    (canMove ? "ring-1 ring-[var(--accent)]" : "opacity-90")
+                                                                }
                                                             >
-                                                                <div style={{ fontWeight: 900, opacity: 0.9 }}>#{i + 1}</div>
+                                                                <div className="font-black text-[var(--muted)]">#{i + 1}</div>
 
-                                                                <div style={{ fontWeight: 800, fontSize: 16, display: "flex", gap: 8, alignItems: "center" }}>
+                                                                <div className="flex items-center gap-2 text-base font-extrabold">
                                                                     <span>{label}</span>
-                                                                    <span
-                                                                        style={{
-                                                                            fontSize: 11,
-                                                                            padding: "2px 8px",
-                                                                            borderRadius: 999,
-                                                                            border: "1px solid rgba(255,255,255,0.14)",
-                                                                            opacity: 0.85,
-                                                                        }}
-                                                                    >
+                                                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--border)] text-[var(--muted)]">
                                                                         {canMove ? "EMPATE" : "FIJO"}
                                                                     </span>
                                                                 </div>
 
-                                                                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                                                                    <button
+                                                                <div className="flex gap-2 justify-end">
+                                                                    <Button
                                                                         type="button"
-                                                                        className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
+                                                                        size="sm"
+                                                                        variant="secondary"
                                                                         disabled={upDisabled}
                                                                         onClick={() => {
                                                                             setManualGroupRows((prevRows) => {
                                                                                 const copy = [...prevRows];
-                                                                                if (i === 0) return prevRows;
-                                                                                if (!copy[i]?.needsManual || !copy[i - 1]?.needsManual) return prevRows;
-
                                                                                 const tmp = copy[i - 1];
                                                                                 copy[i - 1] = copy[i];
                                                                                 copy[i] = tmp;
 
-                                                                                setManualGroupText(copy.map((x) => x.teamId).join("\n"));
+                                                                                setManualGroupText(copy.map((x: any) => safeText(x.teamId)).join("\n"));
                                                                                 return copy;
                                                                             });
                                                                         }}
+                                                                        title={upDisabled ? "No se puede subir (solo dentro del bloque EMPATE)" : "Subir"}
                                                                     >
                                                                         ↑
-                                                                    </button>
+                                                                    </Button>
 
-                                                                    <button
+                                                                    <Button
                                                                         type="button"
-                                                                        className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
+                                                                        size="sm"
+                                                                        variant="secondary"
                                                                         disabled={downDisabled}
                                                                         onClick={() => {
                                                                             setManualGroupRows((prevRows) => {
                                                                                 const copy = [...prevRows];
-                                                                                if (i === copy.length - 1) return prevRows;
-                                                                                if (!copy[i]?.needsManual || !copy[i + 1]?.needsManual) return prevRows;
-
                                                                                 const tmp = copy[i + 1];
                                                                                 copy[i + 1] = copy[i];
                                                                                 copy[i] = tmp;
 
-                                                                                setManualGroupText(copy.map((x) => x.teamId).join("\n"));
+                                                                                setManualGroupText(copy.map((x: any) => safeText(x.teamId)).join("\n"));
                                                                                 return copy;
                                                                             });
                                                                         }}
+                                                                        title={downDisabled ? "No se puede bajar (solo dentro del bloque EMPATE)" : "Bajar"}
                                                                     >
                                                                         ↓
-                                                                    </button>
+                                                                    </Button>
                                                                 </div>
                                                             </div>
                                                         );
@@ -1236,22 +1381,23 @@ export default function AdminGroupsPage() {
                                                     value={manualGroupReason}
                                                     onChange={(e) => setManualGroupReason(e.target.value)}
                                                     placeholder="Campo informativo para indicar criterio de desempate"
-                                                    className="px-3 py-2 rounded-lg bg-zinc-800"
+                                                    className={`${controlInput} w-full`}
                                                 />
 
-                                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                                                    <button
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    <Button
                                                         type="button"
-                                                        className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:opacity-60"
+                                                        size="sm"
                                                         disabled={!token || loading || !!busy}
                                                         onClick={() => applyManualGroupOrder(groupCode)}
                                                     >
                                                         Aplicar manual (Grupo {groupCode})
-                                                    </button>
+                                                    </Button>
 
-                                                    <button
+                                                    <Button
                                                         type="button"
-                                                        className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
+                                                        size="sm"
+                                                        variant="outline"
                                                         onClick={() => {
                                                             setOpenManualGroup(null);
                                                             setManualGroupRows([]);
@@ -1260,549 +1406,532 @@ export default function AdminGroupsPage() {
                                                         }}
                                                     >
                                                         Cancelar
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             </div>
-                                        )}
+                                        )
+                                        }
                                     </div>
-                                )}
+                                )
+                                }
                             </div>
                         );
                     })}
-                </div>
-            </div>
+                </div >
+            </Card >
 
-            {thirdsEnabled && (
-                <>
-                    {/* THIRDS */}
-                    <div style={{ marginTop: 18, padding: 12, border: "1px solid #ddd", borderRadius: 10 }}>
-                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-                            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Ranking global de terceros</h2>
-                            <div style={{ fontSize: 12, opacity: 0.7 }}>needsManualCut: {thirdsRaw?.needsManualCut ? "TRUE" : "false"}</div>
-                        </div>
+            {
+                thirdsEnabled && (
+                    <>
+                        {/* THIRDS */}
+                        <div style={{ marginTop: 18, padding: 12, border: "1px solid #ddd", borderRadius: 10 }}>
+                            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Ranking global de terceros</h2>
+                                <div style={{ fontSize: 12, opacity: 0.7 }}>needsManualCut: {thirdsRaw?.needsManualCut ? "TRUE" : "false"}</div>
+                            </div>
 
-                        {thirds.length === 0 && !loading && (
-                            <div style={{ marginTop: 10, opacity: 0.8 }}>No hay terceros para mostrar (¿ya ejecutaste “Cerrar fase de grupos”?).</div>
-                        )}
+                            {thirds.length === 0 && !loading && (
+                                <div style={{ marginTop: 10, opacity: 0.8 }}>No hay terceros para mostrar (¿ya ejecutaste “Cerrar fase de grupos”?).</div>
+                            )}
 
-                        <div style={{ overflowX: "auto", marginTop: 10 }}>
-                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                                <thead>
-                                    <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-                                        <th style={{ padding: "6px 8px" }}>Rank</th>
-                                        <th style={{ padding: "6px 8px" }}>Equipo</th>
-                                        <th style={{ padding: "6px 8px" }}>Pts</th>
-                                        <th style={{ padding: "6px 8px" }}>DG</th>
-                                        <th style={{ padding: "6px 8px" }}>GF</th>
-                                        <th className="py-2 text-center" style={{ width: 110 }}>
-                                            Clasifica
-                                        </th>
-                                        <th style={{ padding: "6px 8px" }}>Manual</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {thirds.map((r: any, idx: number) => {
-                                        const teamName = r.team?.name ?? r.teamName ?? r.team?.displayName ?? r.name ?? safeText(r.teamId ?? "Equipo");
+                            <div style={{ overflowX: "auto", marginTop: 10 }}>
+                                <table className="w-full border-collapse text-sm">
+                                    <thead>
+                                        <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
+                                            <th style={{ padding: "6px 8px" }}>Rank</th>
+                                            <th style={{ padding: "6px 8px" }}>Equipo</th>
+                                            <th style={{ padding: "6px 8px" }}>Pts</th>
+                                            <th style={{ padding: "6px 8px" }}>DG</th>
+                                            <th style={{ padding: "6px 8px" }}>GF</th>
+                                            <th className="py-2 text-center" style={{ width: 110 }}>
+                                                Clasifica
+                                            </th>
+                                            <th style={{ padding: "6px 8px" }}>Manual</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {thirds.map((r: any, idx: number) => {
+                                            const teamName = r.team?.name ?? r.teamName ?? r.team?.displayName ?? r.name ?? safeText(r.teamId ?? "Equipo");
 
-                                        return (
-                                            <tr key={safeText(r.teamId ?? idx)} style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                                                <td style={{ padding: "6px 8px" }}>{safeText(r.rankGlobal ?? r.rank ?? idx + 1)}</td>
-                                                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{teamName}</td>
-                                                <td style={{ padding: "6px 8px" }}>{safeText(r.points ?? "")}</td>
-                                                <td style={{ padding: "6px 8px" }}>{safeText(r.gd ?? "")}</td>
-                                                <td style={{ padding: "6px 8px" }}>{safeText(r.gf ?? "")}</td>
-
-                                                <td className="py-2 text-center" style={{ width: 110, verticalAlign: "middle" }}>
-                                                    <span style={{ fontSize: 15, lineHeight: "18px", display: "inline-block" }}>{r.isQualified ? "✅" : "❌"}</span>
-                                                </td>
-
-                                                <td style={{ padding: "6px 8px", fontSize: 12, opacity: 0.8 }}>
-                                                    {thirdsCutTieSet.has(safeText(r.teamId)) && r.manualOverride ? "override" : ""}
-                                                    {thirdsCutTieSet.has(safeText(r.teamId)) && r.manualReason ? ` · ${safeText(r.manualReason)}` : ""}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Manual thirds editor */}
-                        {canEditThirdsManual && (
-                            <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10 }}>
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 700 }}>
-                                        Corte manual Top 8 terceros{" "}
-                                        {thirdsCutMeta.needs ? <span style={{ opacity: 0.8 }}>(empate en borde: requiere manual)</span> : null}
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        className={
-                                            openManualThirds
-                                                ? "px-3 py-2 rounded-lg bg-red-700 hover:bg-red-600"
-                                                : "px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600"
-                                        }
-                                        onClick={() => {
-                                            const willOpen = !openManualThirds;
-                                            setOpenManualThirds(willOpen);
-
-                                            if (willOpen) {
-                                                const autoTop8 = (thirds ?? []).slice(0, 8).map((x: any) => safeText(x.teamId)).filter(Boolean);
-
-                                                const init: Record<string, boolean> = {};
-                                                for (const id of autoTop8) init[id] = true;
-
-                                                // si hay empate, forzamos “fijos”
-                                                if (thirdsCutMeta.needs) {
-                                                    for (const id of thirdsCutMeta.lockedIds) init[id] = true;
-                                                }
-
-                                                setManualThirdsSelected(init);
-                                                setManualThirdsText(autoTop8.join("\n"));
-                                                setManualThirdsReason("Campo informativo para indicar criterio de desempate");
-                                            } else {
-                                                setManualThirdsSelected({});
-                                                setManualThirdsText("");
-                                                setManualThirdsReason("");
-                                            }
-                                        }}
-                                    >
-                                        {openManualThirds ? "Cerrar" : "Abrir manual"}
-                                    </button>
-                                </div>
-
-                                {openManualThirds && (
-                                    <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                                            <div style={{ fontSize: 12, opacity: 0.8 }}>
-                                                Seleccionados:{" "}
-                                                <b>
-                                                    {selectedThirdsCount}/8
-                                                    {thirdsCutMeta.needs ? ` (en empate: ${selectedTieCount}/${thirdsCutMeta.slotsLeft})` : ""}
-                                                </b>
-                                            </div>
-
-                                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                                                <button
-                                                    type="button"
-                                                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
-                                                    onClick={() => {
-                                                        const autoTop8 = (thirds ?? []).slice(0, 8).map((x: any) => safeText(x.teamId)).filter(Boolean);
-
-                                                        const next: Record<string, boolean> = {};
-                                                        for (const id of autoTop8) next[id] = true;
-
-                                                        if (thirdsCutMeta.needs) {
-                                                            for (const id of thirdsCutMeta.lockedIds) next[id] = true;
-                                                        }
-
-                                                        setManualThirdsSelected(next);
-                                                    }}
-                                                >
-                                                    Auto seleccionar top 8
-                                                </button>
-
-                                                <button
-                                                    type="button"
-                                                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
-                                                    onClick={() => {
-                                                        const next: Record<string, boolean> = {};
-                                                        if (thirdsCutMeta.needs) {
-                                                            for (const id of thirdsCutMeta.lockedIds) next[id] = true;
-                                                        }
-                                                        setManualThirdsSelected(next);
-                                                    }}
-                                                >
-                                                    Limpiar
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <div style={{ display: "grid", gap: 6 }}>
-                                            {(thirds ?? []).map((r: any, i: number) => {
-                                                const id = safeText(r.teamId);
-                                                const name = safeText(r.team?.name ?? r.teamName ?? r.team?.displayName ?? r.name ?? id);
-                                                const inTie = thirdsCutMeta.needs && thirdsCutMeta.tieIds.has(id);
-                                                const isLocked = thirdsCutMeta.needs && thirdsCutMeta.lockedIds.has(id);
-                                                const checked = !!manualThirdsSelected[id];
-
-                                                const disableByLimit =
-                                                    thirdsCutMeta.needs
-                                                        ? !checked && inTie && maxThirdsReached
-                                                        : !checked && maxThirdsReached;
-
-                                                const disabled = isLocked || disableByLimit;
-
-                                                return (
-                                                    <label
-                                                        key={id || i}
-                                                        style={{
-                                                            display: "flex",
-                                                            alignItems: "center",
-                                                            gap: 10,
-                                                            padding: "8px 10px",
-                                                            borderRadius: 10,
-                                                            border: "1px solid rgba(255,255,255,0.12)",
-                                                            opacity: disabled ? 0.65 : 1,
-                                                            cursor: disabled ? "not-allowed" : "pointer",
-                                                        }}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={checked}
-                                                            disabled={disabled}
-                                                            onChange={() => {
-                                                                setManualThirdsSelected((prev) => {
-                                                                    const next = { ...prev };
-
-                                                                    if (isLocked) {
-                                                                        next[id] = true;
-                                                                        return next;
-                                                                    }
-
-                                                                    const newVal = !prev[id];
-
-                                                                    if (thirdsCutMeta.needs) {
-                                                                        const inTieNow = thirdsCutMeta.tieIds.has(id);
-                                                                        if (newVal && inTieNow) {
-                                                                            const currentTie = Object.entries(prev).filter(
-                                                                                ([tid, v]) => v && thirdsCutMeta.tieIds.has(tid)
-                                                                            ).length;
-
-                                                                            if (currentTie >= thirdsCutMeta.slotsLeft) return prev;
-                                                                        }
-
-                                                                        if (newVal && !inTieNow) {
-                                                                            // no permitir seleccionar fuera del empate si hay empate
-                                                                            return prev;
-                                                                        }
-
-                                                                        // no permitir desmarcar fijos
-                                                                        if (!newVal && thirdsCutMeta.lockedIds.has(id)) return prev;
-                                                                    } else {
-                                                                        const currentCount = Object.values(prev).filter(Boolean).length;
-                                                                        if (newVal && currentCount >= 8) return prev;
-                                                                    }
-
-                                                                    next[id] = newVal;
-                                                                    return next;
-                                                                });
-                                                            }}
+                                            return (
+                                                <tr key={safeText(r.teamId ?? idx)} style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.rankGlobal ?? r.rank ?? idx + 1)}</td>
+                                                    <td style={{ padding: "6px 8px", fontWeight: 600 }}>
+                                                        <TeamWithFlag
+                                                            name={teamName}
+                                                            flagKey={r.team?.flagKey ?? (r as any).flagKey ?? null}
+                                                            isPlaceholder={!!r.team?.isPlaceholder}
                                                         />
+                                                    </td>
+                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.points ?? "")}</td>
+                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.gd ?? "")}</td>
+                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.gf ?? "")}</td>
 
-                                                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                                                            <div style={{ fontWeight: 800, minWidth: 30 }}>{safeText(r.rankGlobal ?? r.rank ?? i + 1)}.</div>
+                                                    <td className="py-2 text-center" style={{ width: 110, verticalAlign: "middle" }}>
+                                                        <span style={{ fontSize: 15, lineHeight: "18px", display: "inline-block" }}>{r.isQualified ? "✅" : "❌"}</span>
+                                                    </td>
 
-                                                            <div style={{ fontWeight: 700 }}>{name}</div>
+                                                    <td style={{ padding: "6px 8px", fontSize: 12, opacity: 0.8 }}>
+                                                        {thirdsCutTieSet.has(safeText(r.teamId)) && r.manualOverride ? "override" : ""}
+                                                        {thirdsCutTieSet.has(safeText(r.teamId)) && r.manualReason ? ` · ${safeText(r.manualReason)}` : ""}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
 
-                                                            {thirdsCutMeta.needs && (
-                                                                <>
-                                                                    {isLocked ? (
-                                                                        <span
-                                                                            style={{
-                                                                                fontSize: 11,
-                                                                                padding: "2px 8px",
-                                                                                borderRadius: 999,
-                                                                                border: "1px solid rgba(255,255,255,0.14)",
-                                                                                opacity: 0.85,
-                                                                            }}
-                                                                        >
-                                                                            FIJO
-                                                                        </span>
-                                                                    ) : inTie ? (
-                                                                        <span
-                                                                            style={{
-                                                                                fontSize: 11,
-                                                                                padding: "2px 8px",
-                                                                                borderRadius: 999,
-                                                                                border: "1px solid rgba(255,255,255,0.14)",
-                                                                                opacity: 0.85,
-                                                                            }}
-                                                                        >
-                                                                            EMPATE
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span
-                                                                            style={{
-                                                                                fontSize: 11,
-                                                                                padding: "2px 8px",
-                                                                                borderRadius: 999,
-                                                                                border: "1px solid rgba(255,255,255,0.14)",
-                                                                                opacity: 0.5,
-                                                                            }}
-                                                                        >
-                                                                            FUERA
-                                                                        </span>
-                                                                    )}
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    </label>
-                                                );
-                                            })}
+                            {/* Manual thirds editor */}
+                            {canEditThirdsManual && (
+                                <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10 }}>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 700 }}>
+                                            Corte manual Top 8 terceros{" "}
+                                            {thirdsCutMeta.needs ? <span style={{ opacity: 0.8 }}>(empate en borde: requiere manual)</span> : null}
                                         </div>
 
-                                        <input
-                                            value={manualThirdsReason}
-                                            onChange={(e) => setManualThirdsReason(e.target.value)}
-                                            placeholder="Campo informativo para indicar criterio de desempate"
-                                            className="px-3 py-2 rounded-lg bg-zinc-800"
-                                        />
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="secondary"
+                                            className={
+                                                openManualThirds
+                                                    ? "border border-[var(--destructive)] bg-[var(--destructive)] text-white hover:bg-[var(--destructive)]/90"
+                                                    : undefined
+                                            }
+                                            onClick={() => {
+                                                const willOpen = !openManualThirds;
+                                                setOpenManualThirds(willOpen);
 
-                                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                                            <button
-                                                type="button"
-                                                className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:opacity-60"
-                                                disabled={!token || loading || !!busy || !thirdsSelectionValid}
-                                                onClick={() => {
-                                                    const picked = Object.entries(manualThirdsSelected)
-                                                        .filter(([, v]) => v)
-                                                        .map(([id]) => id);
+                                                if (willOpen) {
+                                                    const autoTop8 = (thirds ?? []).slice(0, 8).map((x: any) => safeText(x.teamId)).filter(Boolean);
 
-                                                    if (picked.length !== 8) {
-                                                        alert("Debes seleccionar exactamente 8 terceros.");
-                                                        return;
+                                                    const init: Record<string, boolean> = {};
+                                                    for (const id of autoTop8) init[id] = true;
+
+                                                    if (thirdsCutMeta.needs) {
+                                                        for (const id of thirdsCutMeta.lockedIds) init[id] = true;
                                                     }
-                                                    applyManualThirds(picked);
-                                                }}
-                                            >
-                                                Aplicar manual (Top 8)
-                                            </button>
 
-                                            <button
-                                                type="button"
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-                                                onClick={() => {
-                                                    setOpenManualThirds(false);
+                                                    setManualThirdsSelected(init);
+                                                    setManualThirdsText(autoTop8.join("\n"));
+                                                    setManualThirdsReason("Campo informativo para indicar criterio de desempate");
+                                                } else {
                                                     setManualThirdsSelected({});
                                                     setManualThirdsText("");
                                                     setManualThirdsReason("");
-                                                }}
-                                            >
-                                                Cancelar
-                                            </button>
-                                        </div>
+                                                }
+                                            }}
+                                        >
+                                            {openManualThirds ? "Cerrar" : "Abrir manual"}
+                                        </Button>
                                     </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </>
-            )}
 
-            {bracketEnabled && (
-                <>
-                    {/* BRACKET · PASO 6 (Slots de terceros) */}
-                    <div style={{ marginTop: 18, padding: 12, border: "1px solid #ddd", borderRadius: 10 }}>
-                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-                            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Bracket · 16avos (slots de terceros)</h2>
-                            <div style={{ fontSize: 12, opacity: 0.7 }}>
-                                seasonId: {safeText(standingsRaw?.seasonId ?? thirdsRaw?.seasonId ?? user?.activeSeasonId ?? "")}
-                            </div>
+                                    {openManualThirds && (
+                                        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                                                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                                                    Seleccionados:{" "}
+                                                    <b>
+                                                        {selectedThirdsCount}/8
+                                                        {thirdsCutMeta.needs ? ` (en empate: ${selectedTieCount}/${thirdsCutMeta.slotsLeft})` : ""}
+                                                    </b>
+                                                </div>
+
+                                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="secondary"
+                                                        onClick={() => {
+                                                            const autoTop8 = (thirds ?? []).slice(0, 8).map((x: any) => safeText(x.teamId)).filter(Boolean);
+
+                                                            const next: Record<string, boolean> = {};
+                                                            for (const id of autoTop8) next[id] = true;
+
+                                                            if (thirdsCutMeta.needs) {
+                                                                for (const id of thirdsCutMeta.lockedIds) next[id] = true;
+                                                            }
+
+                                                            setManualThirdsSelected(next);
+                                                        }}
+                                                    >
+                                                        Auto seleccionar top 8
+                                                    </Button>
+
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="secondary"
+                                                        onClick={() => {
+                                                            const next: Record<string, boolean> = {};
+                                                            if (thirdsCutMeta.needs) {
+                                                                for (const id of thirdsCutMeta.lockedIds) next[id] = true;
+                                                            }
+                                                            setManualThirdsSelected(next);
+                                                        }}
+                                                    >
+                                                        Limpiar
+                                                    </Button>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid gap-1.5">
+                                                {(thirds ?? []).map((r: any, i: number) => {
+                                                    const id = safeText(r.teamId);
+                                                    const name = safeText(r.team?.name ?? r.teamName ?? r.team?.displayName ?? r.name ?? id);
+                                                    const inTie = thirdsCutMeta.needs && thirdsCutMeta.tieIds.has(id);
+                                                    const isLocked = thirdsCutMeta.needs && thirdsCutMeta.lockedIds.has(id);
+                                                    const checked = !!manualThirdsSelected[id];
+
+                                                    const disableByLimit =
+                                                        thirdsCutMeta.needs
+                                                            ? !checked && inTie && maxThirdsReached
+                                                            : !checked && maxThirdsReached;
+
+                                                    const disabled = isLocked || disableByLimit;
+
+                                                    return (
+                                                        <label
+                                                            key={id || i}
+                                                            style={{
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                gap: 10,
+                                                                padding: "8px 10px",
+                                                                borderRadius: 10,
+                                                                border: "1px solid var(--border)",
+                                                                background: "var(--card)",
+                                                                opacity: disabled ? 0.65 : 1,
+                                                                cursor: disabled ? "not-allowed" : "pointer",
+                                                            }}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                disabled={disabled}
+                                                                onChange={() => {
+                                                                    setManualThirdsSelected((prev) => {
+                                                                        const next = { ...prev };
+
+                                                                        if (isLocked) {
+                                                                            next[id] = true;
+                                                                            return next;
+                                                                        }
+
+                                                                        const newVal = !prev[id];
+
+                                                                        if (thirdsCutMeta.needs) {
+                                                                            const inTieNow = thirdsCutMeta.tieIds.has(id);
+                                                                            if (newVal && inTieNow) {
+                                                                                const currentTie = Object.entries(prev).filter(
+                                                                                    ([tid, v]) => v && thirdsCutMeta.tieIds.has(tid)
+                                                                                ).length;
+
+                                                                                if (currentTie >= thirdsCutMeta.slotsLeft) return prev;
+                                                                            }
+
+                                                                            if (newVal && !inTieNow) {
+                                                                                // no permitir seleccionar fuera del empate si hay empate
+                                                                                return prev;
+                                                                            }
+
+                                                                            // no permitir desmarcar fijos
+                                                                            if (!newVal && thirdsCutMeta.lockedIds.has(id)) return prev;
+                                                                        } else {
+                                                                            const currentCount = Object.values(prev).filter(Boolean).length;
+                                                                            if (newVal && currentCount >= 8) return prev;
+                                                                        }
+
+                                                                        next[id] = newVal;
+                                                                        return next;
+                                                                    });
+                                                                }}
+                                                            />
+
+                                                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                                                <div style={{ fontWeight: 800, minWidth: 30 }}>{safeText(r.rankGlobal ?? r.rank ?? i + 1)}.</div>
+
+                                                                <div style={{ fontWeight: 700 }}>{name}</div>
+
+                                                                {thirdsCutMeta.needs && (
+                                                                    <>
+                                                                        {isLocked ? (
+                                                                            <span
+                                                                                className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[11px] font-semibold text-[var(--foreground)]/80"
+                                                                            >
+                                                                                FIJO
+                                                                            </span>
+                                                                        ) : inTie ? (
+                                                                            <span
+                                                                                className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[11px] font-semibold text-[var(--foreground)]/80"
+                                                                            >
+                                                                                EMPATE
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span
+                                                                                className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[11px] font-semibold text-[var(--foreground)]/80"
+                                                                            >
+                                                                                FUERA
+                                                                            </span>
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            <input
+                                                value={manualThirdsReason}
+                                                onChange={(e) => setManualThirdsReason(e.target.value)}
+                                                placeholder="Campo informativo para indicar criterio de desempate"
+                                                className={`${controlInput} w-full`}
+                                            />
+
+                                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                                <button
+                                                    type="button"
+                                                    className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:opacity-60"
+                                                    disabled={!token || loading || !!busy || !thirdsSelectionValid}
+                                                    onClick={() => {
+                                                        const picked = Object.entries(manualThirdsSelected)
+                                                            .filter(([, v]) => v)
+                                                            .map(([id]) => id);
+
+                                                        if (picked.length !== 8) {
+                                                            alert("Debes seleccionar exactamente 8 terceros.");
+                                                            return;
+                                                        }
+                                                        applyManualThirds(picked);
+                                                    }}
+                                                >
+                                                    Aplicar manual (Top 8)
+                                                </button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => {
+                                                        setOpenManualGroup(null);
+                                                        setManualGroupRows([]);
+                                                        setManualGroupText("");
+                                                        setManualGroupReason("");
+                                                    }}
+                                                >
+                                                    Cancelar
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
+                    </>
+                )
+            }
 
-                        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                            <button
-                                type="button"
-                                className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
-                                disabled={!token || loading || !!busy}
-                                onClick={() => token && loadAll(token)}
-                            >
-                                Refrescar bracket
-                            </button>
-
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                <div style={{ fontSize: 12, opacity: 0.75 }}>Reason (opcional):</div>
-                                <input
-                                    value={bracketReason}
-                                    onChange={(e) => setBracketReason(e.target.value)}
-                                    placeholder="Ej: terceros definidos manualmente"
-                                    style={{
-                                        height: 34,
-                                        padding: "0 10px",
-                                        borderRadius: 8,
-                                        border: "1px solid rgba(255,255,255,0.12)",
-                                        background: "rgba(255,255,255,0.04)",
-                                        width: 360,
-                                        maxWidth: "100%",
-                                    }}
-                                />
-                            </div>
-                        </div>
-
-                        {bracketSlots.length === 0 && !loading && (
-                            <div style={{ marginTop: 10, opacity: 0.85 }}>
-                                No hay slots para mostrar (¿existen en BD? ¿ya seedteaste BracketSlot para R32?).
-                            </div>
-                        )}
-
-                        {bracketSlots.length > 0 && (
-                            <div style={{ overflowX: "auto", marginTop: 10 }}>
-                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                                    <thead>
-                                        <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-                                            <th style={{ padding: "6px 8px", width: 70 }}>Match</th>
-                                            <th style={{ padding: "6px 8px", width: 70 }}>Slot</th>
-                                            <th style={{ padding: "6px 8px" }}>Placeholder</th>
-                                            <th style={{ padding: "6px 8px" }}>Asignación</th>
-                                            <th style={{ padding: "6px 8px", width: 220 }}>Acciones</th>
-                                        </tr>
-                                    </thead>
-
-                                    <tbody>
-                                        {bracketSlots
-                                            .slice()
-                                            .sort(
-                                                (a: any, b: any) =>
-                                                    Number(a.matchNo ?? 999) - Number(b.matchNo ?? 999) ||
-                                                    String(a.slot ?? "").localeCompare(String(b.slot ?? ""))
-                                            )
-                                            .map((s: any, idx: number) => {
-                                                const matchNo = Number(s.matchNo ?? 0);
-                                                const slot = String(s.slot ?? "").toUpperCase(); // HOME / AWAY esperado
-                                                const slotOk = slot === "HOME" || slot === "AWAY";
-
-                                                const key = `${matchNo}-${slot || idx}`;
-                                                const currentTeamId = s.teamId ? String(s.teamId) : "";
-                                                const isAutoAssigned = !!s.teamId && !s.manualOverride;
-                                                const locked = isAutoAssigned;
-                                                const pick = locked ? currentTeamId : (bracketPickByKey[key] ?? currentTeamId);
-
-                                                const placeholder = s.placeholderText ?? s.sourceKey ?? "";
-                                                const isThirdPlaceholder =
-                                                    String(placeholder).includes("3º") ||
-                                                    String(placeholder).includes("3°") ||
-                                                    !!s.needsManual;
-
-                                                // mostramos solo lo pendiente (terceros)
-                                                if (!isThirdPlaceholder) return null;
-
-                                                return (
-                                                    <tr key={key} style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                                                        <td style={{ padding: "6px 8px", fontWeight: 800 }}>{safeText(matchNo)}</td>
-                                                        <td style={{ padding: "6px 8px", fontWeight: 800 }}>{safeText(slot)}</td>
-                                                        <td style={{ padding: "6px 8px", opacity: 0.9 }}>
-                                                            {safeText(placeholder)}
-                                                            {locked ? (
-                                                                <span
-                                                                    style={{
-                                                                        marginLeft: 8,
-                                                                        display: "inline-flex",
-                                                                        alignItems: "center",
-                                                                        padding: "2px 8px",
-                                                                        borderRadius: 999,
-                                                                        border: "1px solid rgba(255,255,255,0.14)",
-                                                                        fontSize: 11,
-                                                                        opacity: 0.9,
-                                                                    }}
-                                                                >
-                                                                    AUTO
-                                                                </span>
-                                                            ) : null}
-                                                        </td>
-
-                                                        <td style={{ padding: "6px 8px" }}>
-                                                            <select
-                                                                value={pick}
-                                                                disabled={!slotOk || locked}
-                                                                onChange={(e) => {
-                                                                    if (locked) return;
-                                                                    const v = e.target.value;
-                                                                    setBracketPickByKey((prev) => ({ ...prev, [key]: v }));
-                                                                }}
-                                                                style={{
-                                                                    height: 34,
-                                                                    borderRadius: 8,
-                                                                    border: "1px solid rgba(0,0,0,0.20)",
-                                                                    background: "#222222",       // 👈 fondo blanco para el dropdown
-                                                                    color: "#ffffff",            // 👈 texto negro (valor seleccionado)
-                                                                    padding: "0 10px",
-                                                                    width: 360,
-                                                                    maxWidth: "100%",
-                                                                    opacity: slotOk ? (locked ? 0.78 : 1) : 0.6,
-                                                                    cursor: locked ? "not-allowed" : "pointer",
-                                                                }}
-
-                                                            >
-                                                                <option value="">(sin asignar)</option>
-
-                                                                {currentTeamId &&
-                                                                    !eligibleThirds.some((x: any) =>
-                                                                        String(x.teamId ?? x.team?.id ?? "") === currentTeamId
-                                                                    ) && (
-                                                                        <option value={currentTeamId}>
-                                                                            {teamDisplayName(s.team, locale) || s.team?.slug || currentTeamId}
-                                                                        </option>
-                                                                    )}
-
-                                                                {eligibleThirds.map((t: any) => {
-                                                                    const tid = String(t.teamId ?? t.team?.id ?? "");
-                                                                    const labelRank = t.rankGlobal ?? t.rank ?? "";
-                                                                    const name = teamDisplayName(t.team, locale) || t.team?.slug || tid;
-
-                                                                    const usedElsewhere = bracketUsedTeamIds.has(tid) && tid !== currentTeamId;
-
-                                                                    return (
-                                                                        <option key={tid} value={tid} disabled={usedElsewhere}>
-                                                                            {labelRank ? `${labelRank}. ` : ""}
-                                                                            {name}
-                                                                            {usedElsewhere ? " (ya usado)" : ""}
-                                                                        </option>
-                                                                    );
-                                                                })}
-                                                            </select>
-
-                                                            {!slotOk && (
-                                                                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-                                                                    Slot inválido: se esperaba HOME/AWAY
-                                                                </div>
-                                                            )}
-
-                                                            {locked && (
-                                                                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-                                                                    Asignado automáticamente — no se puede modificar.
-                                                                </div>
-                                                            )}
-                                                        </td>
-
-                                                        <td style={{ padding: "6px 8px", display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                                            <button
-                                                                type="button"
-                                                                className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:opacity-60"
-                                                                disabled={!token || loading || !!busy || !slotOk || locked}
-                                                                onClick={() => applyBracketSlot(matchNo, slot as "HOME" | "AWAY", pick ? pick : null)}
-                                                            >
-                                                                Aplicar
-                                                            </button>
-
-                                                            <button
-                                                                type="button"
-                                                                className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
-                                                                disabled={!token || loading || !!busy || !slotOk || locked}
-                                                                onClick={() => {
-                                                                    if (locked) return;
-                                                                    setBracketPickByKey((prev) => ({ ...prev, [key]: "" }));
-                                                                    applyBracketSlot(matchNo, slot as "HOME" | "AWAY", null);
-                                                                }}
-                                                            >
-                                                                Limpiar
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                    </tbody>
-                                </table>
-
-                                <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-                                    Nota: el dropdown solo muestra terceros <b>elegibles</b> (isQualified=true) y bloquea duplicados.
+            {
+                bracketEnabled && (
+                    <>
+                        {/* BRACKET · PASO 6 (Slots de terceros) */}
+                        <Card className="mt-5 p-3">
+                            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Bracket · 16avos (slots de terceros)</h2>
+                                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                                    seasonId: {safeText(standingsRaw?.seasonId ?? thirdsRaw?.seasonId ?? user?.activeSeasonId ?? "")}
                                 </div>
                             </div>
-                        )}
-                    </div>
-                </>
-            )}
-        </div>
+
+                            <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!token || loading || !!busy}
+                                    onClick={() => token && loadAll(token)}
+                                >
+                                    Refrescar bracket
+                                </Button>
+
+                                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                    <div style={{ fontSize: 12, opacity: 0.75 }}>Reason (opcional):</div>
+                                    <input
+                                        value={bracketReason}
+                                        onChange={(e) => setBracketReason(e.target.value)}
+                                        placeholder="Ej: terceros definidos manualmente"
+                                        className={`${controlInput} w-[360px] max-w-full`}
+                                    />
+                                </div>
+                            </div>
+
+                            {bracketSlots.length === 0 && !loading && (
+                                <div style={{ marginTop: 10, opacity: 0.85 }}>
+                                    No hay slots para mostrar (¿existen en BD? ¿ya seedteaste BracketSlot para R32?).
+                                </div>
+                            )}
+
+                            {bracketSlots.length > 0 && (
+                                <div style={{ overflowX: "auto", marginTop: 10 }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                                        <thead>
+                                            <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
+                                                <th style={{ padding: "6px 8px", width: 70 }}>Match</th>
+                                                <th style={{ padding: "6px 8px", width: 70 }}>Slot</th>
+                                                <th style={{ padding: "6px 8px" }}>Placeholder</th>
+                                                <th style={{ padding: "6px 8px" }}>Asignación</th>
+                                                <th style={{ padding: "6px 8px", width: 220 }}>Acciones</th>
+                                            </tr>
+                                        </thead>
+
+                                        <tbody>
+                                            {bracketSlots
+                                                .slice()
+                                                .sort(
+                                                    (a: any, b: any) =>
+                                                        Number(a.matchNo ?? 999) - Number(b.matchNo ?? 999) ||
+                                                        String(a.slot ?? "").localeCompare(String(b.slot ?? ""))
+                                                )
+                                                .map((s: any, idx: number) => {
+                                                    const matchNo = Number(s.matchNo ?? 0);
+                                                    const slot = String(s.slot ?? "").toUpperCase(); // HOME / AWAY esperado
+                                                    const slotOk = slot === "HOME" || slot === "AWAY";
+
+                                                    const key = `${matchNo}-${slot || idx}`;
+                                                    const currentTeamId = s.teamId ? String(s.teamId) : "";
+                                                    const isAutoAssigned = !!s.teamId && !s.manualOverride;
+                                                    const locked = isAutoAssigned;
+                                                    const pick = locked ? currentTeamId : (bracketPickByKey[key] ?? currentTeamId);
+
+                                                    const placeholder = s.placeholderText ?? s.sourceKey ?? "";
+                                                    const isThirdPlaceholder =
+                                                        String(placeholder).includes("3º") ||
+                                                        String(placeholder).includes("3°") ||
+                                                        !!s.needsManual;
+
+                                                    // mostramos solo lo pendiente (terceros)
+                                                    if (!isThirdPlaceholder) return null;
+
+                                                    return (
+                                                        <tr key={key} style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                                                            <td style={{ padding: "6px 8px", fontWeight: 800 }}>{safeText(matchNo)}</td>
+                                                            <td style={{ padding: "6px 8px", fontWeight: 800 }}>{safeText(slot)}</td>
+                                                            <td style={{ padding: "6px 8px", opacity: 0.9 }}>
+                                                                {safeText(placeholder)}
+                                                                {locked ? (
+                                                                    <span
+                                                                        style={{
+                                                                            marginLeft: 8,
+                                                                            display: "inline-flex",
+                                                                            alignItems: "center",
+                                                                            padding: "2px 8px",
+                                                                            borderRadius: 999,
+                                                                            border: "1px solid rgba(255,255,255,0.14)",
+                                                                            fontSize: 11,
+                                                                            opacity: 0.9,
+                                                                        }}
+                                                                    >
+                                                                        AUTO
+                                                                    </span>
+                                                                ) : null}
+                                                            </td>
+
+                                                            <td style={{ padding: "6px 8px" }}>
+                                                                <select
+                                                                    value={pick}
+                                                                    disabled={!slotOk || locked}
+                                                                    onChange={(e) => {
+                                                                        if (locked) return;
+                                                                        const v = e.target.value;
+                                                                        setBracketPickByKey((prev) => ({ ...prev, [key]: v }));
+                                                                    }}
+                                                                    className={`${controlSelect} w-[360px] max-w-full`}
+                                                                >
+                                                                    <option value="">(sin asignar)</option>
+
+                                                                    {currentTeamId &&
+                                                                        !eligibleThirds.some((x: any) =>
+                                                                            String(x.teamId ?? x.team?.id ?? "") === currentTeamId
+                                                                        ) && (
+                                                                            <option value={currentTeamId}>
+                                                                                {teamDisplayName(s.team, locale) || s.team?.slug || currentTeamId}
+                                                                            </option>
+                                                                        )}
+
+                                                                    {eligibleThirds.map((t: any) => {
+                                                                        const tid = String(t.teamId ?? t.team?.id ?? "");
+                                                                        const labelRank = t.rankGlobal ?? t.rank ?? "";
+                                                                        const name = teamDisplayName(t.team, locale) || t.team?.slug || tid;
+
+                                                                        const usedElsewhere = bracketUsedTeamIds.has(tid) && tid !== currentTeamId;
+
+                                                                        return (
+                                                                            <option key={tid} value={tid} disabled={usedElsewhere}>
+                                                                                {labelRank ? `${labelRank}. ` : ""}
+                                                                                {name}
+                                                                                {usedElsewhere ? " (ya usado)" : ""}
+                                                                            </option>
+                                                                        );
+                                                                    })}
+                                                                </select>
+
+                                                                {!slotOk && (
+                                                                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+                                                                        Slot inválido: se esperaba HOME/AWAY
+                                                                    </div>
+                                                                )}
+
+                                                                {locked && (
+                                                                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+                                                                        Asignado automáticamente — no se puede modificar.
+                                                                    </div>
+                                                                )}
+                                                            </td>
+
+                                                            <td style={{ padding: "6px 8px", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        disabled={!token || loading || !!busy || !slotOk || locked}
+                                                                        onClick={() => applyBracketSlot(matchNo, slot as "HOME" | "AWAY", pick ? pick : null)}
+                                                                    >
+                                                                        Aplicar
+                                                                    </Button>
+
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        disabled={!token || loading || !!busy || !slotOk || locked}
+                                                                        onClick={() => {
+                                                                            if (locked) return;
+                                                                            setBracketPickByKey((prev) => ({ ...prev, [key]: "" }));
+                                                                            applyBracketSlot(matchNo, slot as "HOME" | "AWAY", null);
+                                                                        }}
+                                                                    >
+                                                                        Limpiar
+                                                                    </Button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                        </tbody>
+                                    </table>
+
+                                    <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                                        Nota: el dropdown solo muestra terceros <b>elegibles</b> (isQualified=true) y bloquea duplicados.
+                                    </div>
+                                </div>
+                            )}
+                        </Card>
+                    </>
+                )
+            }
+        </div >
     );
 }

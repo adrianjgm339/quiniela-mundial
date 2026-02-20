@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Patch, Param, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Patch, Param, Req, UseGuards, Query } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { LeaguesService } from './leagues.service';
 
@@ -13,13 +13,55 @@ export class LeaguesController {
   }
 
   @Post()
-  create(@Req() req, @Body() body: { seasonId: string; name: string; scoringRuleId: string }) {
+  create(
+    @Req() req,
+    @Body() body: { seasonId: string; name: string; scoringRuleId: string; joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL' },
+  ) {
     return this.leagues.createLeague(req.user.userId, body);
   }
 
   @Post('join')
   join(@Req() req, @Body() body: { joinCode: string }) {
     return this.leagues.joinByCode(req.user.userId, body);
+  }
+
+  @Get('public')
+  publicLeagues(@Req() req, @Query('seasonId') seasonId: string) {
+    return this.leagues.listPublicLeagues(req.user.userId, seasonId);
+  }
+
+  @Post(':leagueId/join-public')
+  joinPublic(@Req() req, @Param('leagueId') leagueId: string) {
+    return this.leagues.joinPublic(req.user.userId, leagueId);
+  }
+
+  @Get(':leagueId/access')
+  access(@Req() req, @Param('leagueId') leagueId: string) {
+    return this.leagues.getLeagueAccessSettings(req.user.userId, leagueId);
+  }
+
+  @Patch(':leagueId/access')
+  updateAccess(
+    @Req() req,
+    @Param('leagueId') leagueId: string,
+    @Body() body: { joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL'; inviteEnabled?: boolean; rotateCode?: boolean },
+  ) {
+    return this.leagues.updateLeagueAccessSettings(req.user.userId, leagueId, body);
+  }
+
+  @Get(':leagueId/join-requests')
+  joinRequests(@Req() req, @Param('leagueId') leagueId: string) {
+    return this.leagues.listJoinRequests(req.user.userId, leagueId);
+  }
+
+  @Patch(':leagueId/join-requests/:requestId/decide')
+  decideJoin(
+    @Req() req,
+    @Param('leagueId') leagueId: string,
+    @Param('requestId') requestId: string,
+    @Body() body: { approve: boolean; reason?: string },
+  ) {
+    return this.leagues.decideJoinRequest(req.user.userId, leagueId, requestId, body);
   }
 
   @Patch(':leagueId/scoring-rule')

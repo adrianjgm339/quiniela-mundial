@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { TeamWithFlag } from "@/components/team-with-flag";
+import { Card } from '@/components/ui/card';
 
 type ApiMatchLite = {
   id: string;
@@ -15,8 +18,8 @@ type ApiMatchLite = {
   homeTeamId: string;
   awayTeamId: string;
 
-  homeTeam?: { id: string; name: string; flagKey?: string };
-  awayTeam?: { id: string; name: string; flagKey?: string };
+  homeTeam?: { id: string; name: string; flagKey?: string; isPlaceholder?: boolean; placeholderRule?: string | null };
+  awayTeam?: { id: string; name: string; flagKey?: string; isPlaceholder?: boolean; placeholderRule?: string | null };
 
   resultConfirmed?: boolean;
   score?: { home: number | null; away: number | null };
@@ -60,6 +63,13 @@ function inferSportCompetitionFromSeason(cat: CatalogSport[], seasonId: string) 
 
 const API_URL = 'http://localhost:3001';
 
+// (PRO) Tokens helpers (los vamos a usar)
+const controlBase =
+  'w-full px-3 py-2 rounded-lg text-sm border border-[color:var(--border)] bg-[color:var(--background)] text-[color:var(--foreground)] disabled:opacity-60';
+const controlClickable = `${controlBase} cursor-pointer`;
+
+const controlInput =
+  'w-16 px-2 py-1 rounded text-sm border border-[color:var(--border)] bg-[color:var(--background)] text-[color:var(--foreground)] disabled:opacity-60';
 type BracketSlotLite = {
   matchNo: number;
   slot: 'HOME' | 'AWAY';
@@ -72,6 +82,25 @@ type BracketSlotsResponse = {
   seasonId: string;
   slots: BracketSlotLite[];
 };
+
+function formatLocalDateTime(locale: string, iso?: string | null) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  try {
+    // Formato consistente tipo: 06/01/2026, 22:58
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
+  } catch {
+    return d.toLocaleString();
+  }
+}
 
 function safeStr(x: any) {
   return (x ?? '')
@@ -454,13 +483,27 @@ export default function AdminResultsPage() {
           return;
         }
 
-        const lsSeasonId = localStorage.getItem('admin_ctx_seasonId') ?? '';
-        const sid = lsSeasonId || (me.activeSeasonId ?? '');
+        const lsGlobalSeasonId = localStorage.getItem('activeSeasonId') ?? '';
+        const lsAdminSeasonId = localStorage.getItem('admin_ctx_seasonId') ?? '';
+
+        // Prioridad:
+        // 1) contexto global (Catálogo) guardado en localStorage
+        // 2) backend (/auth/me activeSeasonId)
+        // 3) fallback: último evento usado en esta pantalla (admin_ctx)
+        const sid = lsGlobalSeasonId || (me.activeSeasonId ?? '') || lsAdminSeasonId;
+
         setActiveSeasonId(sid);
 
-        if (sid) {
+        // Si el contexto global cambió, sincronizamos el admin_ctx para evitar "arrastrar" béisbol/fútbol viejos.
+        if (sid && sid !== lsAdminSeasonId) {
           localStorage.setItem('admin_ctx_seasonId', sid);
         }
+
+        // Fallback label (luego lo refinamos con catálogo)
+        const fallbackLabel =
+          me.activeSeason?.name?.trim() ||
+          (me.activeSeason?.year ? `Mundial ${me.activeSeason.year}` : '') ||
+          '';
 
         const label =
           me.activeSeason?.name?.trim() ||
@@ -472,6 +515,22 @@ export default function AdminResultsPage() {
         // 1) Cargar catálogo para armar cascada Sport/Competition/Season
         const cat = await fetchCatalog(locale);
         setCatalog(cat);
+
+        if (sid) {
+          // Label exacto desde catálogo por seasonId
+          let seasonName = '';
+          for (const s of cat ?? []) {
+            for (const c of s.competitions ?? []) {
+              const se = (c.seasons ?? []).find((x) => x.id === sid);
+              if (se?.name) {
+                seasonName = se.name;
+                break;
+              }
+            }
+            if (seasonName) break;
+          }
+          if (seasonName) setActiveSeasonLabel(seasonName);
+        }
 
         // 2) Inicializar selects en base al evento activo (sid)
         if (sid) {
@@ -698,21 +757,21 @@ export default function AdminResultsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={onRecompute}
             disabled={recomputing}
-            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
           >
             {recomputing ? 'Recalculando…' : 'Recalcular Scoring'}
-          </button>
+          </Button>
 
           <div className="flex items-center gap-2">
             <select
               value={resetMode}
               onChange={(e) => setResetMode(e.target.value as any)}
               disabled={resetting}
-              className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer disabled:opacity-60"
+              className={controlClickable}
               title="Reset KO (QA)"
             >
               <option value="">— Reset —</option>
@@ -722,29 +781,32 @@ export default function AdminResultsPage() {
               <option value="all">Limpiar TODO (F01–F07)</option>
             </select>
 
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={onResetKo}
               disabled={resetting || !resetMode}
-              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
               title="Ejecuta reset KO según selección"
             >
               {resetting ? 'Reseteando…' : 'Reset KO'}
-            </button>
+            </Button>
           </div>
 
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => router.push(`/${locale}/rankings`)}
-            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
           >
             Ver Rankings
-          </button>
+          </Button>
 
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => router.push(`/${locale}/dashboard`)}
-            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
           >
             Volver
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -755,7 +817,7 @@ export default function AdminResultsPage() {
               <div className="whitespace-pre-wrap">{error}</div>
               <button
                 onClick={() => setError(null)}
-                className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs"
+                className="px-2 py-1 rounded text-xs border border-[color:var(--border)] bg-[color:var(--background)] hover:bg-[color:var(--muted)]"
               >
                 Cerrar
               </button>
@@ -767,7 +829,7 @@ export default function AdminResultsPage() {
               <div className="whitespace-pre-wrap">{recomputeMsg}</div>
               <button
                 onClick={() => setRecomputeMsg(null)}
-                className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs"
+                className="px-2 py-1 rounded text-xs border border-[color:var(--border)] bg-[color:var(--background)] hover:bg-[color:var(--muted)]"
               >
                 Cerrar
               </button>
@@ -779,7 +841,7 @@ export default function AdminResultsPage() {
               <div className="whitespace-pre-wrap">{resetMsg}</div>
               <button
                 onClick={() => setResetMsg(null)}
-                className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs"
+                className="px-2 py-1 rounded text-xs border border-[color:var(--border)] bg-[color:var(--background)] hover:bg-[color:var(--muted)]"
               >
                 Cerrar
               </button>
@@ -789,118 +851,116 @@ export default function AdminResultsPage() {
       ) : null}
 
       {/* Contexto (Deporte → Competición → Evento) */}
-      <div className="mt-4 w-full rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-200">Contexto</div>
+      <div className="text-sm font-semibold text-[color:var(--foreground)]">Contexto</div>
 
-        <div className="mt-3 grid gap-3">
-          {/* Deporte */}
-          <div className="flex flex-col gap-1">
-            <div className="text-sm opacity-80">Deporte:</div>
-            <select
-              value={sportId}
-              onChange={(e) => {
-                const v = e.target.value;
-                setSportId(v);
-                setCompetitionId('');
-                setSeasonId('');
-              }}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
-            >
-              <option value="">Seleccionar…</option>
-              {catalog.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
+      <div className="mt-3 grid gap-3">
+        {/* Deporte */}
+        <div className="flex flex-col gap-1">
+          <div className="text-sm opacity-80">Deporte:</div>
+          <select
+            value={sportId}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSportId(v);
+              setCompetitionId('');
+              setSeasonId('');
+            }}
+            className={controlClickable}
+          >
+            <option value="">Seleccionar…</option>
+            {catalog.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-          {/* Competición */}
-          <div className="flex flex-col gap-1">
-            <div className="text-sm opacity-80">Competición:</div>
-            <select
-              value={competitionId}
-              onChange={(e) => {
-                const v = e.target.value;
-                setCompetitionId(v);
-                setSeasonId('');
-              }}
-              disabled={!sportId}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 disabled:opacity-60"
-            >
-              <option value="">Seleccionar…</option>
-              {(catalog.find((s) => s.id === sportId)?.competitions ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* Competición */}
+        <div className="flex flex-col gap-1">
+          <div className="text-sm opacity-80">Competición:</div>
+          <select
+            value={competitionId}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCompetitionId(v);
+              setSeasonId('');
+            }}
+            disabled={!sportId}
+            className={controlClickable}
+          >
+            <option value="">Seleccionar…</option>
+            {(catalog.find((s) => s.id === sportId)?.competitions ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-          {/* Evento */}
-          <div className="flex flex-col gap-1">
-            <div className="text-sm opacity-80">Evento:</div>
-            <select
-              value={seasonId}
-              onChange={async (e) => {
-                const token = getTokenOrRedirect();
-                if (!token) return;
+        {/* Evento */}
+        <div className="flex flex-col gap-1">
+          <div className="text-sm opacity-80">Evento:</div>
+          <select
+            value={seasonId}
+            onChange={async (e) => {
+              const token = getTokenOrRedirect();
+              if (!token) return;
 
-                const next = e.target.value;
-                setSeasonId(next);
+              const next = e.target.value;
+              setSeasonId(next);
 
-                try {
-                  setLoading(true);
-                  setError(null);
+              try {
+                setLoading(true);
+                setError(null);
 
-                  const nextSeasonId = next;
+                const nextSeasonId = next;
 
-                  // Persistimos contexto local (para que al recargar vuelva al último evento elegido)
-                  if (nextSeasonId) localStorage.setItem('admin_ctx_seasonId', nextSeasonId);
-                  else localStorage.removeItem('admin_ctx_seasonId');
+                // Persistimos contexto local (para que al recargar vuelva al último evento elegido)
+                if (nextSeasonId) localStorage.setItem('admin_ctx_seasonId', nextSeasonId);
+                else localStorage.removeItem('admin_ctx_seasonId');
 
-                  // Este Admin trabaja directo por seasonId (NO llamamos /auth/active-season)
-                  setActiveSeasonId(nextSeasonId);
+                // Este Admin trabaja directo por seasonId (NO llamamos /auth/active-season)
+                setActiveSeasonId(nextSeasonId);
 
-                  // Label desde catálogo (sin depender de /auth/me)
-                  const seasonName =
-                    catalog
-                      .find((s) => s.id === sportId)
-                      ?.competitions?.find((c) => c.id === competitionId)
-                      ?.seasons?.find((se) => se.id === nextSeasonId)
-                      ?.name ?? '';
+                // Label desde catálogo (sin depender de /auth/me)
+                const seasonName =
+                  catalog
+                    .find((s) => s.id === sportId)
+                    ?.competitions?.find((c) => c.id === competitionId)
+                    ?.seasons?.find((se) => se.id === nextSeasonId)
+                    ?.name ?? '';
 
-                  setActiveSeasonLabel(seasonName);
+                setActiveSeasonLabel(seasonName);
 
-                  // Recargar listados del evento seleccionado
-                  setMatches([]);
-                  setDraft({});
-                  setKoNameByPlaceholder({});
+                // Recargar listados del evento seleccionado
+                setMatches([]);
+                setDraft({});
+                setKoNameByPlaceholder({});
 
-                  await fetchMatches(token, nextSeasonId || undefined);
-                  if (nextSeasonId) await fetchBracketSlots(token, nextSeasonId);
-                } catch (err: any) {
-                  setError(err?.message ?? 'Error cambiando evento');
-                } finally {
-                  setLoading(false);
-                }
-              }}
-              disabled={!sportId || !competitionId}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 disabled:opacity-60"
-            >
-              <option value="">Seleccionar…</option>
-              {(
-                catalog
-                  .find((s) => s.id === sportId)
-                  ?.competitions?.find((c) => c.id === competitionId)
-                  ?.seasons ?? []
-              ).map((se) => (
-                <option key={se.id} value={se.id}>
-                  {se.name}
-                </option>
-              ))}
-            </select>
-          </div>
+                await fetchMatches(token, nextSeasonId || undefined);
+                if (nextSeasonId) await fetchBracketSlots(token, nextSeasonId);
+              } catch (err: any) {
+                setError(err?.message ?? 'Error cambiando evento');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={!sportId || !competitionId}
+            className={controlClickable}
+          >
+            <option value="">Seleccionar…</option>
+            {(
+              catalog
+                .find((s) => s.id === sportId)
+                ?.competitions?.find((c) => c.id === competitionId)
+                ?.seasons ?? []
+            ).map((se) => (
+              <option key={se.id} value={se.id}>
+                {se.name}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -959,7 +1019,7 @@ export default function AdminResultsPage() {
                   setPhaseFilter(v);
                   if (v !== "F01") setGroupFilter("ALL");
                 }}
-                className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer"
+                className={controlClickable}
               >
                 {phaseOptions.map((code) => (
                   <option key={code} value={code}>
@@ -976,7 +1036,7 @@ export default function AdminResultsPage() {
                 onChange={(e) => setGroupFilter(e.target.value)}
                 disabled={!isGroupStage}
                 className={[
-                  "px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800",
+                  controlBase,
                   !isGroupStage ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
                 ].join(" ")}
               >
@@ -990,7 +1050,7 @@ export default function AdminResultsPage() {
           </div>
 
           {/* Derecha: botón */}
-          <button
+          <Button
             onClick={() => {
               setPhaseFilter("ALL");
               setGroupFilter("ALL");
@@ -1005,10 +1065,11 @@ export default function AdminResultsPage() {
                 setError(e?.message ?? "Error recargando matches"),
               );
             }}
-            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm cursor-pointer"
+            variant="secondary"
+            size="sm"
           >
             Limpiar y recargar
-          </button>
+          </Button>
         </div>
 
         {/* 4ta línea: Filtro por fecha */}
@@ -1020,7 +1081,7 @@ export default function AdminResultsPage() {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer"
+              className={controlClickable}
             />
 
             <div className="text-sm opacity-70">a</div>
@@ -1029,7 +1090,7 @@ export default function AdminResultsPage() {
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer"
+              className={controlClickable}
             />
 
             <button
@@ -1038,7 +1099,7 @@ export default function AdminResultsPage() {
                 setDateFrom('');
                 setDateTo('');
               }}
-              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
+              className="px-3 py-2 rounded-lg text-sm border border-[color:var(--border)] bg-[color:var(--background)] hover:bg-[color:var(--muted)]"
             >
               Limpiar fecha
             </button>
@@ -1060,6 +1121,13 @@ export default function AdminResultsPage() {
 
           const rawHome = m.homeTeam?.name ?? 'Home';
           const rawAway = m.awayTeam?.name ?? 'Away';
+
+          const homeIsPlaceholder = !!m.homeTeam?.isPlaceholder;
+          const awayIsPlaceholder = !!m.awayTeam?.isPlaceholder;
+
+          const homePlaceholder = safeStr(m.homeTeam?.placeholderRule);
+          const awayPlaceholder = safeStr(m.awayTeam?.placeholderRule);
+
           // 👇 IDs reales para KO (evita que "Avanza" se blanquee si homeTeamId/awayTeamId vienen vacíos)
           const homeId = safeStr(m.homeTeamId) || safeStr(m.homeTeam?.id);
           const awayId = safeStr(m.awayTeamId) || safeStr(m.awayTeam?.id);
@@ -1067,13 +1135,36 @@ export default function AdminResultsPage() {
           const homeResolved = koNameByPlaceholder[safeStr(rawHome)]?.name;
           const awayResolved = koNameByPlaceholder[safeStr(rawAway)]?.name;
 
-          const displayHome = showPlaceholders ? rawHome : (homeResolved || rawHome);
-          const displayAway = showPlaceholders ? rawAway : (awayResolved || rawAway);
+          const homeResolvedFlagKey = koNameByPlaceholder[safeStr(rawHome)]?.flagKey ?? null;
+          const awayResolvedFlagKey = koNameByPlaceholder[safeStr(rawAway)]?.flagKey ?? null;
+
+          // Flag “real” según el modo:
+          // - showPlaceholders: si es placeholder => no bandera (null)
+          // - si NO showPlaceholders: usar la resolución del bracket si existe, si no el flagKey del equipo base
+          const displayHomeFlagKey = showPlaceholders
+            ? (homeIsPlaceholder ? null : (m.homeTeam?.flagKey ?? null))
+            : (homeResolvedFlagKey ?? m.homeTeam?.flagKey ?? null);
+
+          const displayAwayFlagKey = showPlaceholders
+            ? (awayIsPlaceholder ? null : (m.awayTeam?.flagKey ?? null))
+            : (awayResolvedFlagKey ?? m.awayTeam?.flagKey ?? null);
+
+          // Para que el componente pueda renderizar “placeholder style” solo cuando de verdad no hay flag disponible
+          const displayHomeIsPlaceholder = !displayHomeFlagKey && homeIsPlaceholder;
+          const displayAwayIsPlaceholder = !displayAwayFlagKey && awayIsPlaceholder;
+
+          const displayHome = showPlaceholders
+            ? (homeIsPlaceholder ? (homePlaceholder || rawHome) : rawHome)
+            : (homeResolved || rawHome);
+
+          const displayAway = showPlaceholders
+            ? (awayIsPlaceholder ? (awayPlaceholder || rawAway) : rawAway)
+            : (awayResolved || rawAway);
 
           const title = `${displayHome} vs ${displayAway}`;
 
-          const start = m.utcDateTime ? new Date(m.utcDateTime).toLocaleString() : '—';
-          const close = m.closeUtc ? new Date(m.closeUtc).toLocaleString() : '—';
+          const start = formatLocalDateTime(locale, m.utcDateTime);
+          const close = formatLocalDateTime(locale, m.closeUtc);
           const now = Date.now();
           const closeMs = m.closeUtc ? new Date(m.closeUtc).getTime() : null;
           const isClosed = closeMs !== null && closeMs <= now;
@@ -1104,17 +1195,35 @@ export default function AdminResultsPage() {
           return (
             <div
               key={m.id}
+              data-closed={isClosed ? 'true' : 'false'}
               className={[
-                'p-4 rounded-xl border bg-zinc-950',
-                isClosed ? 'border-red-700/70' : 'border-zinc-800',
+                'p-4 rounded-xl border bg-[color:var(--card)] border-[color:var(--border)]',
+                // sutil “estado cerrado” sin rojos hardcodeados
+                "data-[closed=true]:opacity-95",
               ].join(' ')}
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="font-semibold">{title}</div>
+                  <div className="font-semibold flex flex-wrap items-center gap-2" title={title}>
+                    <TeamWithFlag
+                      name={displayHome}
+                      flagKey={displayHomeFlagKey}
+                      isPlaceholder={displayHomeIsPlaceholder}
+                    />
+                    <span className="text-[color:var(--muted)]">vs</span>
+                    <TeamWithFlag
+                      name={displayAway}
+                      flagKey={displayAwayFlagKey}
+                      isPlaceholder={displayAwayIsPlaceholder}
+                    />
+                  </div>
                   <div className="text-xs opacity-70">
-                    start: {start} · close: {close}
-                    {isClosed ? <span className="ml-2 text-red-300">⛔ Cerrado</span> : null}
+                    Inicio: {start} · Cierre: {close}
+                    {isClosed ? (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[color:var(--background)] px-2 py-0.5 text-[11px] text-[color:var(--muted)]">
+                        ⛔ Cerrado
+                      </span>
+                    ) : null}
                     {showDebug ? (
                       <>
                         {' · '}id: <span className="font-mono">{m.id}</span>
@@ -1124,9 +1233,17 @@ export default function AdminResultsPage() {
                 </div>
 
                 <div className="grid items-center gap-4" style={{ gridTemplateColumns: "120px 52px 52px 120px auto auto" }}>
-                  <div className="text-sm opacity-80 text-right truncate">{displayHome}</div>
+                  <div className="text-sm opacity-80 text-right truncate">
+                    <span className="inline-flex justify-end">
+                      <TeamWithFlag
+                        name={displayHome}
+                        flagKey={displayHomeFlagKey}
+                        isPlaceholder={displayHomeIsPlaceholder}
+                      />
+                    </span>
+                  </div>
                   <input
-                    className="w-16 px-2 py-1 rounded bg-zinc-900 border border-zinc-800"
+                    className={controlInput}
                     value={d.homeScore}
                     disabled={savingId === m.id || m.resultConfirmed || blockedByPrevPhase}
                     onChange={(e) =>
@@ -1139,7 +1256,7 @@ export default function AdminResultsPage() {
                   />
 
                   <input
-                    className="w-16 px-2 py-1 rounded bg-zinc-900 border border-zinc-800"
+                    className={controlInput}
                     value={d.awayScore}
                     disabled={savingId === m.id || m.resultConfirmed || blockedByPrevPhase}
                     onChange={(e) =>
@@ -1150,7 +1267,15 @@ export default function AdminResultsPage() {
                     }
                     inputMode="numeric"
                   />
-                  <div className="text-sm opacity-80 text-left truncate pl-3">{displayAway}</div>
+                  <div className="text-sm opacity-80 text-left truncate pl-3">
+                    <span className="inline-flex justify-start">
+                      <TeamWithFlag
+                        name={displayAway}
+                        flagKey={displayAwayFlagKey}
+                        isPlaceholder={displayAwayIsPlaceholder}
+                      />
+                    </span>
+                  </div>
 
                   <div className="text-sm opacity-80 inline-flex items-center gap-2 whitespace-nowrap">
                     <input
@@ -1180,7 +1305,7 @@ export default function AdminResultsPage() {
                             [m.id]: { ...d, advanceTeamId: e.target.value },
                           }))
                         }
-                        className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer"
+                        className={controlClickable}
                       >
                         <option value="">—</option>
                         {homeId ? (
@@ -1211,7 +1336,7 @@ export default function AdminResultsPage() {
                             [m.id]: { ...d, advanceMethod: e.target.value as any },
                           }))
                         }
-                        className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer"
+                        className={controlClickable}
                       >
                         <option value="">—</option>
                         <option value="ET">Prórroga</option>
@@ -1220,19 +1345,31 @@ export default function AdminResultsPage() {
                     </div>
                   ) : null}
 
-                  <button
+                  <Button
                     onClick={() => onSaveMatch(m.id)}
                     disabled={savingId === m.id || m.resultConfirmed || blockedByPrevPhase}
                     style={showKOAdvance ? { gridColumn: "6", gridRow: "1" } : undefined}
-                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60 whitespace-nowrap"
+                    variant="secondary"
+                    size="sm"
+                    className="whitespace-nowrap"
                   >
                     {savingId === m.id ? 'Guardando…' : 'Guardar'}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
               <div className="mt-2 text-sm opacity-80">
-                Estado actual: {m.resultConfirmed ? '✅ Confirmado' : '⏳ Pendiente'}{' '}
+                <span className="mr-2">Estado:</span>
+
+                {m.resultConfirmed ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[color:var(--background)] px-2 py-0.5 text-[11px] text-[color:var(--accent)]">
+                    ✅ Confirmado
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-[color:var(--background)] px-2 py-0.5 text-[11px] text-[color:var(--muted)]">
+                    ⏳ Pendiente
+                  </span>
+                )}{' '}
                 {m.score?.home !== null &&
                   m.score?.home !== undefined &&
                   m.score?.away !== null &&
@@ -1250,11 +1387,11 @@ export default function AdminResultsPage() {
         })}
 
         {filteredMatches.length === 0 ? (
-          <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950 text-sm opacity-80">
+          <Card className="p-4 text-sm text-[color:var(--muted)]">
             No hay partidos para mostrar con el filtro actual.
-          </div>
+          </Card>
         ) : null}
       </div>
-    </div>
+    </div >
   );
 }

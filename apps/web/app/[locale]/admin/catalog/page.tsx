@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -19,6 +18,16 @@ import {
     listScoringRules,
     type ApiScoringRule,
 } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+const controlBase =
+    "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm " +
+    "text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] " +
+    "disabled:opacity-60 disabled:cursor-not-allowed";
+const controlInput = controlBase;
+const controlSelect = controlBase;
 
 
 type User = {
@@ -560,121 +569,107 @@ export default function AdminCatalogPage() {
     // UI
     // ---------------------------
     return (
-        <div style={{ maxWidth: 1200, margin: "40px auto", padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <div>
-                    <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Admin · Catálogo</h1>
-                    <div style={{ marginTop: 6, fontSize: 13, opacity: 0.75 }}>
-                        Lectura desde API: <span style={{ opacity: 0.9 }}>/catalog?locale={locale}</span>
+        <div className="max-w-6xl mx-auto px-4 py-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                    <h1 className="text-xl font-semibold m-0">Admin · Catálogo</h1>
+                    <div className="mt-1 text-sm text-[var(--muted)]">
+                        Lectura desde API:{" "}
+                        <span className="font-mono text-[var(--foreground)]">/catalog?locale={locale}</span>
                     </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <button
-                        onClick={() => reloadCatalog()}
-                        className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-                    >
+                <div className="flex items-center gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => reloadCatalog()}>
                         Recargar
-                    </button>
+                    </Button>
 
-                    <Link href={`/${locale}/admin`} className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700">
+                    <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/admin`)}>
                         Volver
-                    </Link>
+                    </Button>
                 </div>
             </div>
 
-            {!user && !error && <p style={{ marginTop: 16 }}>Cargando...</p>}
+            {!user && !error && <p className="mt-4 text-sm text-[var(--muted)]">Cargando…</p>}
 
-            {error && (
-                <div style={{ marginTop: 16, background: "#ffe5e5", color: "#000", padding: 10, borderRadius: 8 }}>
-                    {error}
-                </div>
-            )}
+            {error ? (
+                <Card className="mt-4 p-3">
+                    <div className="text-sm whitespace-pre-wrap">⚠️ {error}</div>
+                </Card>
+            ) : null}
 
             {user && (
                 <div style={{ marginTop: 18 }}>
                     {loadingCatalog ? (
-                        <div style={{ opacity: 0.8 }}>Cargando catálogo...</div>
+                        <div className="text-sm text-[var(--muted)]">Cargando catálogo…</div>
                     ) : (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                        <div className="grid gap-4 lg:grid-cols-3">
                             {/* Deportes */}
-                            <div
-                                style={{
-                                    border: "1px solid rgba(255,255,255,0.12)",
-                                    borderRadius: 14,
-                                    padding: 14,
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                                    <div style={{ fontWeight: 700 }}>Deportes</div>
-                                    <span style={{ fontSize: 12, opacity: 0.7 }}>{sports.length}</span>
+                            <Card className="p-4">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-sm font-semibold">Deportes</div>
+                                    <Badge>{sports.length}</Badge>
                                 </div>
 
                                 {/* Create Sport */}
-                                <div style={{ marginTop: 10 }} className="bg-zinc-900 rounded-xl p-3 border border-white/10">
-                                    <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Crear deporte</div>
+                                <Card className="mt-3 p-3">
+                                    <div className="text-sm font-semibold mb-2">Crear deporte</div>
                                     <div style={{ display: "grid", gap: 8 }}>
                                         <input
                                             value={newSportEs}
                                             onChange={(e) => setNewSportEs(e.target.value)}
                                             placeholder="Nombre ES (ejm: Fútbol)"
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                            className={controlInput}
                                         />
                                         <input
                                             value={newSportEn}
                                             onChange={(e) => setNewSportEn(e.target.value)}
                                             placeholder="Nombre EN (ejm: Football)"
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                            className={controlInput}
                                         />
-                                        <button
-                                            onClick={onCreateSport}
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-                                        >
+                                        <Button onClick={onCreateSport} variant="secondary" size="sm">
                                             Crear
-                                        </button>
+                                        </Button>
                                     </div>
-                                    <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
-                                        Slug es automático en backend.
-                                    </div>
-                                </div>
+                                    <div className="mt-2 text-xs text-[var(--muted)]">Slug es automático en backend.</div>
+                                </Card>
 
                                 {/* Edit Sport */}
                                 {editSportId && (
-                                    <div style={{ marginTop: 10 }} className="bg-zinc-900 rounded-xl p-3 border border-white/10">
+                                    <Card className="mt-3 p-3">
                                         <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Editar deporte</div>
                                         <div style={{ display: "grid", gap: 8 }}>
                                             <input
                                                 value={editSportEs}
                                                 onChange={(e) => setEditSportEs(e.target.value)}
                                                 placeholder="Nombre ES"
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                                className={controlInput}
                                             />
                                             <input
                                                 value={editSportEn}
                                                 onChange={(e) => setEditSportEn(e.target.value)}
                                                 placeholder="Nombre EN"
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                                className={controlInput}
                                             />
-                                            <div style={{ display: "flex", gap: 8 }}>
-                                                <button
-                                                    onClick={onSaveEditSport}
-                                                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-                                                >
+                                            <div className="flex gap-2">
+                                                <Button size="sm" onClick={onSaveEditSport}>
                                                     Guardar
-                                                </button>
-                                                <button
+                                                </Button>
+
+                                                <Button
+                                                    size="sm"
+                                                    variant="secondary"
                                                     onClick={() => {
                                                         setEditSportId(null);
                                                         setEditSportEs("");
                                                         setEditSportEn("");
                                                     }}
-                                                    className="px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 hover:bg-zinc-800"
                                                 >
                                                     Cancelar
-                                                </button>
+                                                </Button>
                                             </div>
                                         </div>
-                                    </div>
+                                    </Card>
                                 )}
 
                                 <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
@@ -684,7 +679,7 @@ export default function AdminCatalogPage() {
                                         return (
                                             <div
                                                 key={s.id}
-                                                className={`rounded-lg border ${active ? "border-white/25" : "border-white/10"} bg-zinc-900`}
+                                                className={`rounded-xl border border-[var(--border)] bg-[var(--card)] ${active ? "ring-2 ring-[var(--accent)]" : ""}`}
                                             >
                                                 <button
                                                     onClick={() => {
@@ -692,7 +687,7 @@ export default function AdminCatalogPage() {
                                                         // si cambias el sport, limpieza explícita de comp
                                                         setSelectedCompetitionId(null);
                                                     }}
-                                                    className={`w-full text-left px-3 py-2 rounded-lg ${active ? "bg-zinc-800" : "bg-zinc-900 hover:bg-zinc-800"}`}
+                                                    className={`w-full text-left px-3 py-2 rounded-xl hover:bg-[var(--muted)] ${active ? "bg-[var(--muted)]" : ""}`}
                                                 >
                                                     <div style={{ fontWeight: 700 }}>{s.name}</div>
                                                     <div style={{ fontSize: 12, opacity: 0.7 }}>
@@ -708,18 +703,12 @@ export default function AdminCatalogPage() {
                                                 </button>
 
                                                 <div style={{ display: "flex", gap: 8, marginTop: 10, padding: "0 12px 14px 12px" }}>
-                                                    <button
-                                                        onClick={() => onStartEditSport(s.id)}
-                                                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
-                                                    >
+                                                    <Button size="sm" variant="secondary" onClick={() => onStartEditSport(s.id)}>
                                                         Editar
-                                                    </button>
-                                                    <button
-                                                        onClick={() => onDeleteSport(s.id)}
-                                                        className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 hover:bg-zinc-800 text-sm"
-                                                    >
+                                                    </Button>
+                                                    <Button size="sm" variant="secondary" onClick={() => onDeleteSport(s.id)}>
                                                         Borrar
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             </div>
                                         );
@@ -727,19 +716,13 @@ export default function AdminCatalogPage() {
 
                                     {!sports.length && <div style={{ opacity: 0.75 }}>Sin deportes.</div>}
                                 </div>
-                            </div>
+                            </Card>
 
                             {/* Competiciones */}
-                            <div
-                                style={{
-                                    border: "1px solid rgba(255,255,255,0.12)",
-                                    borderRadius: 14,
-                                    padding: 14,
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                                    <div style={{ fontWeight: 700 }}>Competiciones</div>
-                                    <span style={{ fontSize: 12, opacity: 0.7 }}>{competitions.length}</span>
+                            <Card className="p-4">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-sm font-semibold">Competiciones</div>
+                                    <Badge>{competitions.length}</Badge>
                                 </div>
 
                                 <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
@@ -751,73 +734,66 @@ export default function AdminCatalogPage() {
                                 </div>
 
                                 {/* Create Competition */}
-                                <div style={{ marginTop: 10 }} className="bg-zinc-900 rounded-xl p-3 border border-white/10">
+                                <Card className="mt-3 p-3">
                                     <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Crear competición</div>
                                     <div style={{ display: "grid", gap: 8 }}>
                                         <input
                                             value={newCompEs}
                                             onChange={(e) => setNewCompEs(e.target.value)}
                                             placeholder="Nombre ES (ejm: Copa Mundial FIFA)"
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                            className={controlInput}
                                             disabled={!selectedSportId}
                                         />
                                         <input
                                             value={newCompEn}
                                             onChange={(e) => setNewCompEn(e.target.value)}
                                             placeholder="Nombre EN (ejm: FIFA World Cup)"
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                            className={controlInput}
                                             disabled={!selectedSportId}
                                         />
-                                        <button
-                                            onClick={onCreateCompetition}
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
-                                            disabled={!selectedSportId}
-                                        >
+                                        <Button onClick={onCreateCompetition} variant="secondary" size="sm" disabled={!selectedSportId}>
                                             Crear
-                                        </button>
+                                        </Button>
                                     </div>
-                                    <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
-                                        Slug es automático en backend.
-                                    </div>
-                                </div>
+                                    <div className="mt-2 text-xs text-[var(--muted)]">Slug es automático en backend.</div>
+                                </Card>
 
                                 {/* Edit Competition */}
                                 {editCompetitionId && (
-                                    <div style={{ marginTop: 10 }} className="bg-zinc-900 rounded-xl p-3 border border-white/10">
+                                    <Card className="mt-3 p-3">
                                         <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Editar competición</div>
                                         <div style={{ display: "grid", gap: 8 }}>
                                             <input
                                                 value={editCompEs}
                                                 onChange={(e) => setEditCompEs(e.target.value)}
                                                 placeholder="Nombre ES"
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                                className={controlInput}
                                             />
                                             <input
                                                 value={editCompEn}
                                                 onChange={(e) => setEditCompEn(e.target.value)}
                                                 placeholder="Nombre EN"
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                                className={controlInput}
                                             />
-                                            <div style={{ display: "flex", gap: 8 }}>
-                                                <button
-                                                    onClick={onSaveEditCompetition}
-                                                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-                                                >
+                                            <div className="flex gap-2">
+                                                <Button size="sm" onClick={onSaveEditCompetition}>
                                                     Guardar
-                                                </button>
-                                                <button
+                                                </Button>
+
+                                                <Button
+                                                    size="sm"
+                                                    variant="secondary"
                                                     onClick={() => {
                                                         setEditCompetitionId(null);
                                                         setEditCompEs("");
                                                         setEditCompEn("");
                                                     }}
-                                                    className="px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 hover:bg-zinc-800"
                                                 >
                                                     Cancelar
-                                                </button>
+                                                </Button>
                                             </div>
                                         </div>
-                                    </div>
+                                    </Card>
                                 )}
 
                                 <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
@@ -828,11 +804,11 @@ export default function AdminCatalogPage() {
                                         return (
                                             <div
                                                 key={c.id}
-                                                className={`rounded-lg border ${active ? "border-white/25" : "border-white/10"} bg-zinc-900`}
+                                                className={`rounded-xl border border-[var(--border)] bg-[var(--card)] ${active ? "ring-2 ring-[var(--accent)]" : ""}`}
                                             >
                                                 <button
                                                     onClick={() => setSelectedCompetitionId(c.id)}
-                                                    className={`w-full text-left px-3 py-2 rounded-lg ${active ? "bg-zinc-800" : "bg-zinc-900 hover:bg-zinc-800"}`}
+                                                    className={`w-full text-left px-3 py-2 rounded-xl hover:bg-[var(--muted)] ${active ? "bg-[var(--muted)]" : ""}`}
                                                     disabled={!selectedSportId}
                                                 >
                                                     <div style={{ fontWeight: 700 }}>{c.name}</div>
@@ -849,18 +825,12 @@ export default function AdminCatalogPage() {
                                                 </button>
 
                                                 <div style={{ display: "flex", gap: 8, marginTop: 10, padding: "0 12px 14px 12px" }}>
-                                                    <button
-                                                        onClick={() => onStartEditCompetition(c.id)}
-                                                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
-                                                    >
+                                                    <Button size="sm" variant="secondary" onClick={() => onStartEditCompetition(c.id)}>
                                                         Editar
-                                                    </button>
-                                                    <button
-                                                        onClick={() => onDeleteCompetition(c.id)}
-                                                        className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 hover:bg-zinc-800 text-sm"
-                                                    >
+                                                    </Button>
+                                                    <Button size="sm" variant="secondary" onClick={() => onDeleteCompetition(c.id)}>
                                                         Borrar
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             </div>
                                         );
@@ -869,19 +839,13 @@ export default function AdminCatalogPage() {
                                     {!selectedSportId && <div style={{ opacity: 0.75 }}>Selecciona un deporte.</div>}
                                     {selectedSportId && !competitions.length && <div style={{ opacity: 0.75 }}>Sin competiciones.</div>}
                                 </div>
-                            </div>
+                            </Card>
 
                             {/* Eventos (Season) */}
-                            <div
-                                style={{
-                                    border: "1px solid rgba(255,255,255,0.12)",
-                                    borderRadius: 14,
-                                    padding: 14,
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                                    <div style={{ fontWeight: 700 }}>Eventos</div>
-                                    <span style={{ fontSize: 12, opacity: 0.7 }}>{seasons.length}</span>
+                            <Card className="p-4">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-sm font-semibold">Eventos</div>
+                                    <Badge>{seasons.length}</Badge>
                                 </div>
 
                                 <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
@@ -893,27 +857,27 @@ export default function AdminCatalogPage() {
                                 </div>
 
                                 {/* Create Season */}
-                                <div style={{ marginTop: 10 }} className="bg-zinc-900 rounded-xl p-3 border border-white/10">
+                                <Card className="mt-3 p-3">
                                     <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Crear evento</div>
                                     <div style={{ display: "grid", gap: 8 }}>
                                         <input
                                             value={newSeasonEs}
                                             onChange={(e) => setNewSeasonEs(e.target.value)}
                                             placeholder="Nombre ES (ejm: Mundial 2026)"
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                            className={controlInput}
                                             disabled={!selectedCompetitionId}
                                         />
                                         <input
                                             value={newSeasonEn}
                                             onChange={(e) => setNewSeasonEn(e.target.value)}
                                             placeholder="Nombre EN (ejm: World Cup 2026)"
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                            className={controlInput}
                                             disabled={!selectedCompetitionId}
                                         />
                                         <select
                                             value={newSeasonDefaultRuleId}
                                             onChange={(e) => setNewSeasonDefaultRuleId(e.target.value)}
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                            className={controlSelect}
                                             disabled={!selectedCompetitionId || loadingRules}
                                         >
                                             {loadingRules ? (
@@ -931,40 +895,34 @@ export default function AdminCatalogPage() {
                                         <div style={{ marginTop: 6, fontSize: 12, opacity: 0.65 }}>
                                             Regla estándar del evento (Ranking Mundial/País): <span style={{ opacity: 0.9 }}>{newSeasonDefaultRuleId || "—"}</span>
                                         </div>
-                                        <button
-                                            onClick={onCreateSeason}
-                                            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
-                                            disabled={!selectedCompetitionId}
-                                        >
+                                        <Button onClick={onCreateSeason} variant="secondary" size="sm" disabled={!selectedCompetitionId}>
                                             Crear
-                                        </button>
+                                        </Button>
                                     </div>
-                                    <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
-                                        Slug es automático en backend.
-                                    </div>
-                                </div>
+                                    <div className="mt-2 text-xs text-[var(--muted)]">Slug es automático en backend.</div>
+                                </Card>
 
                                 {/* Edit Season */}
                                 {editSeasonId && (
-                                    <div style={{ marginTop: 10 }} className="bg-zinc-900 rounded-xl p-3 border border-white/10">
+                                    <Card className="mt-3 p-3">
                                         <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Editar evento</div>
                                         <div style={{ display: "grid", gap: 8 }}>
                                             <input
                                                 value={editSeasonEs}
                                                 onChange={(e) => setEditSeasonEs(e.target.value)}
                                                 placeholder="Nombre ES"
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                                className={controlInput}
                                             />
                                             <input
                                                 value={editSeasonEn}
                                                 onChange={(e) => setEditSeasonEn(e.target.value)}
                                                 placeholder="Nombre EN"
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                                className={controlInput}
                                             />
                                             <select
                                                 value={editSeasonDefaultRuleId}
                                                 onChange={(e) => setEditSeasonDefaultRuleId(e.target.value)}
-                                                className="px-3 py-2 rounded-lg bg-zinc-800 border border-white/10 outline-none"
+                                                className={controlSelect}
                                                 disabled={loadingRules}
                                             >
                                                 {loadingRules ? (
@@ -983,25 +941,23 @@ export default function AdminCatalogPage() {
                                                 Regla estándar del evento (Ranking Mundial/País): <span style={{ opacity: 0.9 }}>{editSeasonDefaultRuleId || "—"}</span>
                                             </div>
                                             <div style={{ display: "flex", gap: 8 }}>
-                                                <button
-                                                    onClick={onSaveEditSeason}
-                                                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-                                                >
+                                                <Button size="sm" onClick={onSaveEditSeason}>
                                                     Guardar
-                                                </button>
-                                                <button
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="secondary"
                                                     onClick={() => {
                                                         setEditSeasonId(null);
                                                         setEditSeasonEs("");
                                                         setEditSeasonEn("");
                                                     }}
-                                                    className="px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 hover:bg-zinc-800"
                                                 >
                                                     Cancelar
-                                                </button>
+                                                </Button>
                                             </div>
                                         </div>
-                                    </div>
+                                    </Card>
                                 )}
 
                                 <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
@@ -1009,7 +965,7 @@ export default function AdminCatalogPage() {
                                         const names = getItemNames(namesBySeasonId, ev.id);
 
                                         return (
-                                            <div key={ev.id} className="rounded-lg bg-zinc-900 border border-white/10">
+                                            <div key={ev.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)]">
                                                 <div className="px-3 py-2">
                                                     <div style={{ fontWeight: 700 }}>{ev.name}</div>
                                                     <div style={{ fontSize: 12, opacity: 0.7 }}>{ev.slug}</div>
@@ -1023,18 +979,12 @@ export default function AdminCatalogPage() {
                                                 </div>
 
                                                 <div style={{ display: "flex", gap: 8, marginTop: 10, padding: "0 12px 14px 12px" }}>
-                                                    <button
-                                                        onClick={() => onStartEditSeason(ev.id)}
-                                                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
-                                                    >
+                                                    <Button size="sm" variant="secondary" onClick={() => onStartEditSeason(ev.id)}>
                                                         Editar
-                                                    </button>
-                                                    <button
-                                                        onClick={() => onDeleteSeason(ev.id)}
-                                                        className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 hover:bg-zinc-800 text-sm"
-                                                    >
+                                                    </Button>
+                                                    <Button size="sm" variant="secondary" onClick={() => onDeleteSeason(ev.id)}>
                                                         Borrar
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             </div>
                                         );
@@ -1043,7 +993,7 @@ export default function AdminCatalogPage() {
                                     {!selectedCompetitionId && <div style={{ opacity: 0.75 }}>Selecciona una competición.</div>}
                                     {selectedCompetitionId && !seasons.length && <div style={{ opacity: 0.75 }}>Sin eventos.</div>}
                                 </div>
-                            </div>
+                            </Card>
                         </div>
                     )}
 
@@ -1051,7 +1001,8 @@ export default function AdminCatalogPage() {
                         Nota: Si intentas borrar un item con dependencias, el backend debería responder con error (integridad). Aquí lo mostramos tal cual.
                     </div>
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 }

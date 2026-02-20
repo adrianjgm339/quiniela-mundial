@@ -1,21 +1,92 @@
 @import "tailwindcss";
 
-/* Por defecto dejamos dark */
+/* Theme tokens (light por defecto vía :root, dark por clase) */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-}
-
-/* Si algún día quieres light mode real, lo activamos con clase .light */
-html.light {
   --background: #ffffff;
   --foreground: #171717;
+
+  --card: #f6f6f7;
+  --border: rgba(0, 0, 0, 0.12);
+  --muted: rgba(0, 0, 0, 0.6);
+
+  --accent: #10b981;
+  /* teal/green */
+  --accent-foreground: #0a0a0a;
+
+  /* Estados (global UI) */
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  --warning: #f59e0b;
+  --warning-foreground: #0a0a0a;
+
+  /* Highlights standings */
+  --qualify-direct-bg: color-mix(in srgb, var(--accent) 16%, transparent);
+  --qualify-direct-border: color-mix(in srgb, var(--accent) 35%, transparent);
+
+  --qualify-third-bg: color-mix(in srgb, var(--warning) 18%, transparent);
+  --qualify-third-border: color-mix(in srgb, var(--warning) 35%, transparent);
+
+  color-scheme: light;
 }
+
+html.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+
+  --card: rgba(24, 24, 27, 0.55);
+  --border: rgba(255, 255, 255, 0.10);
+  --muted: rgba(255, 255, 255, 0.55);
+
+  --accent: #10b981;
+  --accent-foreground: #0a0a0a;
+
+    /* Estados (global UI) */
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  --warning: #f59e0b;
+  --warning-foreground: #0a0a0a;
+
+  /* Highlights standings */
+  --qualify-direct-bg: color-mix(in srgb, var(--accent) 16%, transparent);
+  --qualify-direct-border: color-mix(in srgb, var(--accent) 35%, transparent);
+
+  --qualify-third-bg: color-mix(in srgb, var(--warning) 18%, transparent);
+  --qualify-third-border: color-mix(in srgb, var(--warning) 35%, transparent);
+
+  color-scheme: dark;
+}
+
+/* si quieres forzar light explícito (opcional) */
+html.light {
+  color-scheme: light;
+}
+
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Helpers para superficies "oscuras" dentro de light mode */
+:root {
+  --surface-strong: #111827;
+  /* slate-900-ish */
+  --on-surface-strong: #f9fafb;
+  /* casi blanco */
+}
+
+html.dark {
+  --surface-strong: #111827;
+  --on-surface-strong: #f9fafb;
+}
+
+/* Si un botón/card usa fondo muy oscuro, fuerza texto claro en light */
+[data-surface="strong"] {
+  background: var(--surface-strong) !important;
+  color: var(--on-surface-strong) !important;
 }
 
 /* Cursor "manito" en elementos clickeables */

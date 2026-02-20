@@ -12,11 +12,22 @@ import {
   setScoringRuleDetails,
   createScoringRule,
   recomputeScoring,
+  getSeasonConcepts,
   type ApiScoringRule,
   type ApiScoringRuleDetail,
   type CatalogSport,
   type ApiLeague,
 } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+const controlBase =
+  "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm " +
+  "text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] " +
+  "disabled:opacity-60 disabled:cursor-not-allowed";
+const controlSelect = controlBase;
+const controlInput = controlBase;
 
 const DEFAULT_CODES: Array<{ code: string; label: string }> = [
   { code: "EXACTO", label: "Marcador exacto" },
@@ -68,6 +79,7 @@ export default function AdminRulesPage() {
   const [competitionId, setCompetitionId] = useState<string>("");
   const [seasonId, setSeasonId] = useState<string>(""); // evento seleccionado en esta pantalla
   const [activeSeasonLabel, setActiveSeasonLabel] = useState<string>("");
+  const [concepts, setConcepts] = useState<Array<{ code: string; label: string }>>(DEFAULT_CODES);
 
   const [allLeagues, setAllLeagues] = useState<ApiLeague[]>([]);
   const [leagueId, setLeagueId] = useState<string>(""); // opcional (mis ligas para ese evento)
@@ -122,13 +134,20 @@ export default function AdminRulesPage() {
       // 3) SeasonId efectivo
       // Regla CLAVE: si nextSeasonId viene explícito (aunque sea ""), NO usamos fallbacks.
       // Esto evita que al cambiar Deporte/Competición vuelva a pisar con u.activeSeasonId.
-      const lsSeasonId = localStorage.getItem("admin_ctx_seasonId") ?? "";
+      const lsGlobalSeasonId = localStorage.getItem("activeSeasonId") ?? "";
+      const lsAdminSeasonId = localStorage.getItem("admin_ctx_seasonId") ?? "";
+
       const sid =
         nextSeasonId !== undefined
           ? nextSeasonId
-          : (lsSeasonId || (u.activeSeasonId ?? "") || "");
+          : (lsGlobalSeasonId || (u.activeSeasonId ?? "") || lsAdminSeasonId || "");
 
       setSeasonId(sid);
+
+      // Si el contexto global cambió, sincronizamos admin_ctx para no “arrastrar” otro evento.
+      if (sid && sid !== lsAdminSeasonId) {
+        localStorage.setItem("admin_ctx_seasonId", sid);
+      }
 
       if (sid) {
         localStorage.setItem("admin_ctx_seasonId", sid);
@@ -145,6 +164,23 @@ export default function AdminRulesPage() {
         setActiveSeasonLabel("");
       }
 
+      // 3.1) Conceptos por Evento (Season) para el panel de "Puntos"
+      if (sid) {
+        try {
+          const conceptRows = await getSeasonConcepts(token, sid);
+
+          const nextConcepts =
+            (conceptRows ?? [])
+              .filter((x: any) => x?.code)
+              .map((x: any) => ({ code: x.code, label: (x.label ?? x.code) as string }));
+
+          setConcepts(nextConcepts.length ? nextConcepts : DEFAULT_CODES);
+        } catch {
+          setConcepts(DEFAULT_CODES);
+        }
+      } else {
+        setConcepts(DEFAULT_CODES);
+      }
 
       // 4) Mis ligas (para combo Liga)
       try {
@@ -204,7 +240,7 @@ export default function AdminRulesPage() {
         ? prev.details.map((d) => (d.code === code ? { ...d, points } : d))
         : [...prev.details, { code, points }];
 
-      const order = new Map(DEFAULT_CODES.map((x, i) => [x.code, i]));
+      const order = new Map(concepts.map((x, i) => [x.code, i]));
       details.sort((a, b) => (order.get(a.code) ?? 999) - (order.get(b.code) ?? 999));
 
       return { ...prev, details };
@@ -289,7 +325,7 @@ export default function AdminRulesPage() {
         name,
         description: newDesc.trim() ? newDesc.trim() : null,
         isGlobal: false,
-        details: DEFAULT_CODES.map((x) => ({ code: x.code, points: 0 })),
+        details: concepts.map((x) => ({ code: x.code, points: 0 })),
       });
 
       setNewId("");
@@ -314,58 +350,60 @@ export default function AdminRulesPage() {
     : "Esta regla puede asignarse a ligas (League.scoringRuleId) para el Ranking de Liga. Los rankings Mundial/País usan la regla estándar del Evento (Season.defaultScoringRuleId).";
 
   return (
-    <div style={{ maxWidth: 980, margin: "40px auto", padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Admin · Reglas</h1>
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold m-0">Admin · Reglas</h1>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={() => router.push(`/${locale}/admin`)}
-            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700"
-          >
+          {seasonId ? (
+            <Badge className="max-w-[520px] truncate">
+              {activeSeasonLabel || seasonId}
+            </Badge>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/admin`)}>
             Volver
-          </button>
+          </Button>
 
-          <button
-            onClick={onRecompute}
-            disabled={saving}
-            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
-          >
+          <Button variant="secondary" size="sm" onClick={onRecompute} disabled={saving}>
             {saving ? "Procesando…" : "Recalcular Scoring"}
-          </button>
+          </Button>
         </div>
       </div>
 
-      {loading ? <p style={{ marginTop: 16 }}>Cargando…</p> : null}
+      {loading ? <p className="mt-4 text-sm text-[var(--muted)]">Cargando…</p> : null}
 
       {error ? (
-        <div className="mt-4 p-3 rounded-lg border border-red-700 bg-red-950 text-red-200 text-sm whitespace-pre-wrap">
-          {error}
-        </div>
+        <Card className="mt-4 p-3">
+          <div className="text-sm whitespace-pre-wrap">⚠️ {error}</div>
+        </Card>
       ) : null}
 
       {msg ? (
-        <div className="mt-4 p-3 rounded-lg border border-emerald-700 bg-emerald-950 text-emerald-200 text-sm">
-          {msg}
-        </div>
+        <Card className="mt-4 p-3">
+          <div className="text-sm">{msg}</div>
+        </Card>
       ) : null}
 
-
       {/* Contexto (Deporte → Competición → Evento → Liga) */}
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
-        <div className="text-xs uppercase tracking-wider text-white/60">Contexto</div>
+      <Card className="mt-6 p-4">
+        <div className="text-xs uppercase tracking-wider text-[var(--muted)]">Contexto</div>
 
-        <div className="mt-1 text-sm text-white/80">
+        <div className="mt-1 text-sm text-[var(--muted)]">
           Evento activo:{" "}
-          <span className="font-semibold text-white">{activeSeasonLabel || (seasonId ? seasonId : "—")}</span>
+          <span className="font-semibold text-[var(--foreground)]">
+            {activeSeasonLabel || (seasonId ? seasonId : "—")}
+          </span>
         </div>
 
         <div className="mt-4 grid gap-3 max-w-xl">
           {/* Deporte */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-white/60">Deporte</label>
+            <label className="text-xs text-[var(--muted)]">Deporte</label>
             <select
-              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              className={controlSelect}
               value={sportId}
               onChange={(e) => {
                 const next = e.target.value;
@@ -393,9 +431,9 @@ export default function AdminRulesPage() {
 
           {/* Competición */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-white/60">Competición</label>
+            <label className="text-xs text-[var(--muted)]">Competición</label>
             <select
-              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              className={controlSelect}
               value={competitionId}
               onChange={(e) => {
                 const next = e.target.value;
@@ -423,9 +461,9 @@ export default function AdminRulesPage() {
 
           {/* Evento */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-white/60">Evento</label>
+            <label className="text-xs text-[var(--muted)]">Evento</label>
             <select
-              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              className={controlSelect}
               value={seasonId}
               onChange={(e) => {
                 const next = e.target.value || "";
@@ -463,9 +501,9 @@ export default function AdminRulesPage() {
 
           {/* Liga (opcional) */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-white/60">Liga (opcional)</label>
+            <label className="text-xs text-[var(--muted)]">Liga (opcional)</label>
             <select
-              className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 text-sm"
+              className={controlSelect}
               value={leagueId}
               onChange={(e) => {
                 const next = e.target.value || "";
@@ -484,21 +522,42 @@ export default function AdminRulesPage() {
             </select>
 
             {!!seasonId && leaguesForSeason.length === 0 && (
-              <div className="text-xs text-white/50 mt-1">No tienes ligas para este evento (o aún no cargaron).</div>
+              <div className="text-xs text-[var(--muted)] mt-1">
+                No tienes ligas para este evento (o aún no cargaron).
+              </div>
             )}
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-[320px_1fr]">
+      {!seasonId ? (
+        <Card className="mt-6 p-4">
+          <div className="text-sm font-semibold">Selecciona un Evento</div>
+          <div className="text-sm text-[var(--muted)] mt-1">
+            Para administrar reglas, primero elige un <span className="font-medium text-[var(--foreground)]">Evento</span> en el bloque
+            de Contexto.
+          </div>
+        </Card>
+      ) : null}
+
+      {seasonId && rules.length === 0 ? (
+        <Card className="mt-6 p-4">
+          <div className="text-sm font-semibold">Sin reglas para este evento</div>
+          <div className="text-sm text-[var(--muted)] mt-1">
+            Puedes crear una regla personalizada desde la columna izquierda.
+          </div>
+        </Card>
+      ) : null}
+
+      <div className="mt-6 grid gap-4 md:grid-cols-[340px_1fr]">
         {/* LEFT */}
-        <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950 space-y-4">
-          <div className="font-semibold">Reglas disponibles</div>
+        <Card className="p-4 space-y-4">
+          <div className="text-sm font-semibold">Reglas disponibles</div>
 
           <select
             value={selectedId}
             onChange={(e) => setSelectedId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
+            className={controlSelect}
           >
             {rules.map((r) => (
               <option key={r.id} value={r.id}>
@@ -507,110 +566,132 @@ export default function AdminRulesPage() {
             ))}
           </select>
 
-          <div className="text-xs opacity-70">
-            Seleccionada: <span className="font-mono">{selected?.id ?? "—"}</span>
+          <div className="text-xs text-[var(--muted)]">
+            Seleccionada: <span className="font-mono text-[var(--foreground)]">{selected?.id ?? "—"}</span>
           </div>
 
-          <div className="pt-2 border-t border-zinc-800">
-            <div className="font-semibold">Crear regla</div>
+          <div className="pt-3 border-t border-[var(--border)]">
+            <div className="text-sm font-semibold">Crear regla</div>
 
             <div className="space-y-2 mt-2">
+              {!seasonId ? (
+                <div className="text-xs text-[var(--muted)]">
+                  Selecciona un <span className="font-medium text-[var(--foreground)]">Evento</span> para habilitar la creación de reglas.
+                </div>
+              ) : null}
               <input
                 value={newId}
                 onChange={(e) => setNewId(e.target.value)}
                 placeholder='ID (ej: "R01")'
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
+                disabled={!seasonId || creating}
+                className={controlInput}
               />
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="Nombre"
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
+                disabled={!seasonId || creating}
+                className={controlInput}
               />
               <input
                 value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)}
                 placeholder="Descripción (opcional)"
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
+                disabled={!seasonId || creating}
+                className={controlInput}
               />
 
-              <button
-                type="button"
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-full"
                 onClick={onCreateRule}
-                disabled={creating}
-                className="w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
+                disabled={!seasonId || creating}
               >
                 {creating ? "Creando…" : "Crear"}
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* RIGHT */}
-        <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950 space-y-4">
-          {!editing ? (
-            <div className="text-sm opacity-70">Selecciona una regla para editar.</div>
+        <Card className="p-4 space-y-4">
+          {!seasonId ? (
+            <div className="text-sm text-[var(--muted)]">
+              Selecciona un evento en <span className="font-medium text-[var(--foreground)]">Contexto</span> para cargar y editar reglas.
+            </div>
+          ) : !editing ? (
+            <div className="text-sm text-[var(--muted)]">Selecciona una regla para editar.</div>
           ) : (
             <>
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-semibold">
-                    Editando: <span className="font-mono">{editing.id}</span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold">
+                      Editando: <span className="font-mono">{editing.id}</span>
+                    </div>
+
+                    {isSystemRule ? (
+                      <Badge>Sistema</Badge>
+                    ) : (
+                      <Badge>Editable</Badge>
+                    )}
                   </div>
-                  <div className="text-xs opacity-70 mt-1">{baselineHint}</div>
+
+                  <div className="text-xs text-[var(--muted)] mt-1">{baselineHint}</div>
                 </div>
 
-                <button
-                  type="button"
+                <Button
+                  size="sm"
                   onClick={onSave}
                   disabled={saving || !canEditPoints}
-                  className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60"
+                  className="shrink-0"
                 >
                   {saving ? "Guardando…" : "Guardar"}
-                </button>
+                </Button>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
-                  <div className="text-sm opacity-80">Nombre</div>
+                  <div className="text-sm text-[var(--muted)]">Nombre</div>
                   <input
                     value={editing.name}
                     onChange={(e) => setEditing((p) => (p ? { ...p, name: e.target.value } : p))}
                     disabled={isSystemRule}
-                    className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
+                    className={controlInput}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <div className="text-sm opacity-80">Descripción</div>
+                  <div className="text-sm text-[var(--muted)]">Descripción</div>
                   <input
                     value={editing.description ?? ""}
                     onChange={(e) => setEditing((p) => (p ? { ...p, description: e.target.value } : p))}
-                    className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800"
+                    className={controlInput}
                   />
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-zinc-800">
-                <div className="font-semibold mb-2">Puntos</div>
+              <div className="pt-3 border-t border-[var(--border)]">
+                <div className="text-sm font-semibold mb-2">Puntos</div>
 
                 {!canEditPoints ? (
-                  <div className="text-xs opacity-70 mb-2">
+                  <div className="text-xs text-[var(--muted)] mb-2">
                     Esta es una regla predefinida del sistema. Solo se puede visualizar. Para modificar puntos, crea una regla personalizada.
                   </div>
                 ) : null}
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  {DEFAULT_CODES.map((x) => {
+                  {concepts.map((x) => {
                     const curr = editing.details.find((d) => d.code === x.code)?.points ?? 0;
                     return (
                       <div
                         key={x.code}
-                        className="flex items-center justify-between gap-3 p-3 rounded-lg border border-zinc-800 bg-zinc-900"
+                        className="flex items-center justify-between gap-3 p-3 rounded-xl border border-[var(--border)] bg-[var(--background)]"
                       >
-                        <div>
+                        <div className="min-w-0">
                           <div className="text-sm font-medium">{x.label}</div>
-                          <div className="text-xs opacity-70 font-mono">{x.code}</div>
+                          <div className="text-xs text-[var(--muted)] font-mono">{x.code}</div>
                         </div>
 
                         <input
@@ -618,21 +699,22 @@ export default function AdminRulesPage() {
                           value={curr}
                           onChange={(e) => setDetail(x.code, Number(e.target.value))}
                           disabled={!canEditPoints}
-                          className="w-24 px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                          inputMode="numeric"
+                          step={1}
+                          className="w-24 text-right tabular-nums rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-60 disabled:cursor-not-allowed"
                         />
-
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              <div className="text-xs opacity-70">
+              <div className="text-xs text-[var(--muted)]">
                 Nota: El Ranking de Liga usa la regla configurada en la liga. Los rankings Mundial/País usan la regla estándar del Evento (Season.defaultScoringRuleId).
               </div>
             </>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );

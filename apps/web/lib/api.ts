@@ -20,6 +20,58 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return res.json();
 }
 
+export async function googleLogin(idToken: string): Promise<LoginResponse> {
+  const res = await fetch(`${API_BASE}/auth/google`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Google login failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function forgotPassword(email: string) {
+  const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+
+  // Siempre OK (anti-enumeration), pero igual manejamos errores de red/500
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Forgot password failed (${res.status})`);
+  }
+
+  return res.json() as Promise<{ ok: boolean; message: string }>;
+}
+
+export type RegisterResponse = LoginResponse;
+
+export async function register(
+  email: string,
+  password: string,
+  displayName: string
+): Promise<RegisterResponse> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, displayName }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Register failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
 export async function me(token: string, locale: string) {
   if (!token || !token.trim()) {
     throw new Error("Unauthorized: missing token (frontend is not storing/reading the token)");
