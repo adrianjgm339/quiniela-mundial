@@ -17,13 +17,14 @@ import {
   type ApiScoringRule,
   type ApiScoringRuleDetail,
 } from '@/lib/api';
-import AiChatWidget from '../../components/AiChatWidget';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/ui/page-header';
+import AiChatWidget from '../../components/AiChatWidget';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3001';
+
 const NEW_LEAGUE = '__NEW__';
 
 const joinPolicyLabel = (p?: string) => {
@@ -53,32 +54,41 @@ function friendlyErrorMessage(raw: unknown) {
   if (s.includes('League rules are locked') || s.includes('Tournament has started')) {
     return 'No se puede cambiar la regla porque el torneo ya inició.';
   }
+
+  // errores típicos del backend
   if (s.includes('Insufficient league role')) return 'No tienes permisos en esta liga para guardar la regla.';
   if (s.includes('Admin only')) return 'Solo un ADMIN del sistema puede realizar esta acción.';
   if (s.includes('Failed')) return 'Ocurrió un error. Intenta nuevamente.';
   return s || 'Ocurrió un error.';
 }
 
-function parseAndValidateCustomPoints(
-  customPoints: Record<string, string>,
-  concepts: Array<{ code: string; label: string }>
-) {
+function parseAndValidateCustomPoints(customPoints: Record<string, string>, concepts: Array<{ code: string; label: string }>) {
   const details: Array<{ code: string; points: number }> = [];
+
   let hasPositive = false;
 
   for (const c of concepts) {
     const raw = (customPoints[c.code] ?? '').toString().trim();
     const n = Number(raw);
 
-    if (raw === '' || !Number.isFinite(n)) throw new Error(`Puntos inválidos para "${c.label}".`);
-    if (!Number.isInteger(n)) throw new Error(`No se permiten decimales en "${c.label}".`);
-    if (n < 0) throw new Error(`No se permiten puntos negativos en "${c.label}".`);
+    if (raw === '' || !Number.isFinite(n)) {
+      throw new Error(`Puntos inválidos para "${c.label}".`);
+    }
+    if (!Number.isInteger(n)) {
+      throw new Error(`No se permiten decimales en "${c.label}".`);
+    }
+    if (n < 0) {
+      throw new Error(`No se permiten puntos negativos en "${c.label}".`);
+    }
     if (n > 0) hasPositive = true;
 
     details.push({ code: c.code, points: n });
   }
 
-  if (!hasPositive) throw new Error('Debes asignar puntos (>0) a al menos 1 concepto.');
+  if (!hasPositive) {
+    throw new Error('Debes asignar puntos (>0) a al menos 1 concepto.');
+  }
+
   return details;
 }
 
@@ -86,11 +96,6 @@ function makePointsRecord(concepts: Array<{ code: string }>) {
   const rec: Record<string, string> = {};
   for (const c of concepts) rec[c.code] = '0';
   return rec;
-}
-
-function isCustomRuleId(id?: string | null) {
-  if (!id) return false;
-  return id.startsWith('C') || id.toLowerCase().includes('custom');
 }
 
 export default function LeaguesPage() {
@@ -111,12 +116,16 @@ export default function LeaguesPage() {
   const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>('');
   const [selectedSeasonFilterId, setSelectedSeasonFilterId] = useState<string>(''); // evento
 
+
   const [leagues, setLeagues] = useState<ApiLeague[]>([]);
   const [loadingLeagues, setLoadingLeagues] = useState(true);
 
   const [concepts, setConcepts] = useState<Array<{ code: string; label: string }>>(DEFAULT_CONCEPTS);
-
   const [rules, setRules] = useState<ApiScoringRule[]>([]);
+  const isPredefinedRuleId = (id?: string | null) => !!id && /^(B|R)\d+/.test(id);
+  // OJO: si tú no estás usando ids tipo R01..R05, ajusta el regex.
+  const isPredefinedRule = (r: any) => !!r && (r.isGlobal === true || isPredefinedRuleId(r.id));
+
   const [loadingRules, setLoadingRules] = useState(false);
 
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>(''); // '' = "Seleccionar"
@@ -124,58 +133,25 @@ export default function LeaguesPage() {
   const [selectedRule, setSelectedRule] = useState<ApiScoringRule | null>(null);
   const [loadingRuleDetails, setLoadingRuleDetails] = useState(false);
 
-  // Crear liga
+  // Modo crear liga (solo aplica cuando selectedLeagueId === NEW_LEAGUE)
   const [newLeagueName, setNewLeagueName] = useState('');
   const [newJoinPolicy, setNewJoinPolicy] = useState<'PUBLIC' | 'PRIVATE' | 'APPROVAL'>('PRIVATE');
   const [newRuleMode, setNewRuleMode] = useState<'PREDEFINED' | 'CUSTOM'>('PREDEFINED');
-
-  // Custom rule (crear)
   const [customRuleName, setCustomRuleName] = useState('');
   const [customPoints, setCustomPoints] = useState<Record<string, string>>(makePointsRecord(DEFAULT_CONCEPTS));
 
-  // Custom rule (editar en liga existente)
+  // Edición de regla personalizada existente (cuando la liga ya existe)
   const [editPoints, setEditPoints] = useState<Record<string, string>>(makePointsRecord(DEFAULT_CONCEPTS));
 
-  const [savingLeagueRule, setSavingLeagueRule] = useState(false);
-
-  const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+
+  const [savingLeagueRule, setSavingLeagueRule] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // -------- helpers --------
-  async function refreshLeagues(t: string) {
-    const data = await getMyLeagues(t);
-    setLeagues(data);
-    return data;
-  }
-
-  async function loadRuleDetailsIfNeeded(t: string, ruleId: string) {
-    if (!ruleId) {
-      setSelectedRule(null);
-      return;
-    }
-    setLoadingRuleDetails(true);
-    try {
-      const r = await getScoringRule(t, ruleId);
-      setSelectedRule(r);
-
-      // si es una custom rule de la liga y quieres editar, precargar puntos
-      if (isCustomRuleId(ruleId)) {
-        const rec: Record<string, string> = {};
-        for (const c of concepts) {
-          const pts = r?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
-          rec[c.code] = String(pts);
-        }
-        setEditPoints(rec);
-      }
-    } finally {
-      setLoadingRuleDetails(false);
-    }
-  }
-
-  // -------- auth bootstrap --------
+  // 1) token + /auth/me (incluye activeSeason)
   useEffect(() => {
     const t = localStorage.getItem('token');
     if (!t) {
@@ -188,99 +164,139 @@ export default function LeaguesPage() {
       try {
         const m = await me(t, locale);
         setMeInfo(m);
+        setActiveSeasonNameLabel(m?.activeSeason?.name ?? '—');
+        const seasonId = m?.activeSeason?.id ?? m?.activeSeasonId ?? null;
+        if (seasonId) {
+          setActiveSeasonId(seasonId);
+          localStorage.setItem('activeSeasonId', seasonId);
 
-        if (m?.activeSeason?.id) {
-          setActiveSeasonId(m.activeSeason.id);
-          setActiveSeasonNameLabel(m.activeSeason.name ?? 'Seleccionar');
-          localStorage.setItem('activeSeasonId', m.activeSeason.id);
-        } else {
-          const lsSeason = localStorage.getItem('activeSeasonId');
-          if (lsSeason) setActiveSeasonId(lsSeason);
         }
+
       } catch {
-        // silencioso
+        // si falla /auth/me, dejamos que la pantalla muestre el error luego
       }
     })();
   }, [locale, router]);
 
-  // -------- load catalog --------
+  // Catálogo (mismos datos que usa /catalog)
   useEffect(() => {
-    if (!token) return;
-
     (async () => {
       try {
         setLoadingCatalog(true);
         const cat = await getCatalog(locale);
         setCatalog(cat);
+      } catch (e: any) {
+        setError((prev) => prev ?? `No se pudo cargar el catálogo: ${friendlyErrorMessage(e)}`);
       } finally {
         setLoadingCatalog(false);
       }
     })();
-  }, [token, locale]);
+  }, [locale]);
 
-  // -------- load leagues --------
+  // 2) cargar ligas
+  async function refreshLeagues(tkn: string) {
+    const data = await getMyLeagues(tkn);
+    setLeagues(data);
+
+    // No auto-seleccionamos nada: dejamos "Seleccionar" por defecto
+    if (selectedLeagueId === NEW_LEAGUE) return data;
+
+    // si la liga seleccionada ya no existe, limpiar selección
+    if (selectedLeagueId && !data.some((x) => x.id === selectedLeagueId)) {
+      setSelectedLeagueId('');
+      setSelectedRuleId('');
+      setSelectedRule(null);
+    }
+
+    return data;
+  }
+
   useEffect(() => {
     if (!token) return;
-
     (async () => {
       try {
         setLoadingLeagues(true);
+        setError(null);
         await refreshLeagues(token);
       } catch (e: any) {
-        setError(e?.message ?? 'Error cargando ligas');
+        setError(friendlyErrorMessage(e));
       } finally {
         setLoadingLeagues(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // -------- load rules --------
+  // 3) cargar reglas (para cualquier usuario debería ser lectura; si hoy está ADMIN-only, mostramos error amigable)
   useEffect(() => {
     if (!token) return;
-
     (async () => {
       try {
         setLoadingRules(true);
-        const list = await listScoringRules(token);
-        setRules(list);
+        const data = await listScoringRules(token, selectedSeasonFilterId || undefined);
+        setRules(data);
       } catch (e: any) {
-        setError(e?.message ?? 'Error cargando reglas');
+        const msg = friendlyErrorMessage(e);
+        setError((prev) => prev ?? `No se pudieron cargar las reglas: ${msg}`);
       } finally {
         setLoadingRules(false);
       }
     })();
-  }, [token]);
+  }, [token, selectedSeasonFilterId]);
 
-  // -------- load concepts by season --------
+  // 4) al cambiar liga seleccionada, ajustar selectedRuleId desde la liga (si existe)
+  useEffect(() => {
+    const league = leagues.find((l) => l.id === selectedLeagueId) as any;
+    if (!league) return;
+    const sr = league.scoringRuleId as string | undefined;
+    if (sr) setSelectedRuleId(sr);
+  }, [selectedLeagueId, leagues]);
+
+  // 5) cargar detalle de la regla seleccionada
   useEffect(() => {
     if (!token) return;
-    if (!selectedSeasonFilterId) {
-      setConcepts(DEFAULT_CONCEPTS);
-      return;
-    }
+    if (!selectedRuleId) return;
 
     (async () => {
       try {
-        const c = await getSeasonConcepts(token, selectedSeasonFilterId);
-        if (Array.isArray(c) && c.length > 0) {
-          setConcepts(c);
-          setCustomPoints(makePointsRecord(c));
-          setEditPoints(makePointsRecord(c));
-        } else {
-          setConcepts(DEFAULT_CONCEPTS);
-        }
-      } catch {
-        setConcepts(DEFAULT_CONCEPTS);
+        setLoadingRuleDetails(true);
+        setSelectedRule(null);
+        const data = await getScoringRule(token, selectedRuleId);
+        setSelectedRule(data);
+      } catch (e: any) {
+        setError(friendlyErrorMessage(e));
+      } finally {
+        setLoadingRuleDetails(false);
       }
     })();
-  }, [token, selectedSeasonFilterId]);
+  }, [token, selectedRuleId]);
 
+  const selectedLeague = useMemo(
+    () => leagues.find((l) => l.id === selectedLeagueId) as any,
+    [leagues, selectedLeagueId],
+  );
+
+  const myUserId = meInfo?.user?.id ?? meInfo?.id ?? null;
+  const myLeagueRole = useMemo(() => {
+    if (!selectedLeague) return null;
+
+    // ✅ PRIORIDAD: rol real enviado por el backend para ESTA liga
+    const role = selectedLeague?.myRole ?? selectedLeague?.role;
+    if (role) return role;
+
+    // Fallback (solo si el backend NO mandó myRole):
+    if (myUserId && selectedLeague.createdById === myUserId) return 'OWNER';
+
+    return 'MEMBER';
+  }, [selectedLeague, myUserId]);
+
+  // Valores reales (tomados de /auth/me, mismos que ves en "Selecciona tu evento")
   const sportOptions = useMemo(() => catalog ?? [], [catalog]);
 
   const competitionOptions = useMemo(() => {
-    const s = catalog.find((x) => x.id === selectedSportId);
+    const s = sportOptions.find((x) => x.id === selectedSportId);
     return s?.competitions ?? [];
-  }, [catalog, selectedSportId]);
+  }, [sportOptions, selectedSportId]);
 
   const seasonOptions = useMemo(() => {
     const c = competitionOptions.find((x) => x.id === selectedCompetitionId);
@@ -290,62 +306,243 @@ export default function LeaguesPage() {
   const filtersReady = !!selectedSportId && !!selectedCompetitionId && !!selectedSeasonFilterId;
   const eventSelected = !!selectedSeasonFilterId;
 
+  // Mostrar solo ligas del evento seleccionado (si ya tienes seasonId en la liga)
   const leaguesByEvent = useMemo(() => {
     if (!selectedSeasonFilterId) return [];
-    return leagues.filter((l: any) => l.seasonId === selectedSeasonFilterId);
+    return leagues.filter((l: any) => l?.seasonId === selectedSeasonFilterId);
   }, [leagues, selectedSeasonFilterId]);
 
-  const selectedLeague = useMemo(() => {
-    if (!selectedLeagueId || selectedLeagueId === NEW_LEAGUE) return null;
-    return leagues.find((x: any) => x.id === selectedLeagueId) as any;
-  }, [leagues, selectedLeagueId]);
+    const aiContext = useMemo(() => {
+    return {
+      page: 'leagues',
+      locale,
+      token,
+      activeSeasonId,
+      activeSeasonNameLabel,
 
-  const canSaveLeagueRule = useMemo(() => {
-    // tu backend suele exponer myRole
-    const role = selectedLeague?.myRole;
-    return role === 'OWNER' || role === 'ADMIN';
-  }, [selectedLeague]);
+      // filtros UI
+      selectedSportId,
+      selectedCompetitionId,
+      selectedSeasonFilterId,
 
-  const ruleOptionsForSelect = useMemo(() => {
-    return rules ?? [];
-  }, [rules]);
+      // ligas
+      leaguesCount: leagues?.length ?? 0,
+      leaguesByEventCount: leaguesByEvent?.length ?? 0,
 
-  const isEditingLeagueCustomRule = useMemo(() => {
-    if (!selectedLeague) return false;
-    return isCustomRuleId(selectedLeague.scoringRuleId);
-  }, [selectedLeague]);
+      selectedLeague: selectedLeague
+        ? {
+            id: selectedLeague.id,
+            name: selectedLeague.name,
+            joinCode: selectedLeague.joinCode,
+            joinPolicy: (selectedLeague as any).joinPolicy ?? null,
+            scoringRuleId: (selectedLeague as any).scoringRuleId ?? null,
+            seasonId: (selectedLeague as any).seasonId ?? null,
+            myRole: (selectedLeague as any).myRole ?? myLeagueRole ?? null,
+          }
+        : null,
 
-  // cuando cambia selectedRuleId, cargar detalle
+      // estado creación/entrada (útil para el bot)
+      newJoinPolicy,
+      newRuleMode,
+      selectedRuleId,
+      joinCode,
+    };
+  }, [
+    locale,
+    token,
+    activeSeasonId,
+    activeSeasonNameLabel,
+    selectedSportId,
+    selectedCompetitionId,
+    selectedSeasonFilterId,
+    leagues,
+    leaguesByEvent,
+    selectedLeague,
+    myLeagueRole,
+    newJoinPolicy,
+    newRuleMode,
+    selectedRuleId,
+    joinCode,
+  ]);
+
+  // Al escoger evento aquí, lo dejamos como activeSeasonId para el createLeague
   useEffect(() => {
-    if (!token) return;
-    if (!selectedRuleId) {
+    if (!selectedSeasonFilterId) {
+      setActiveSeasonId(null);
+      setActiveSeasonNameLabel('Seleccionar');
+      localStorage.removeItem('activeSeasonId');
+
+      // Reset de selección
+      setSelectedLeagueId('');
+      setSelectedRuleId('');
       setSelectedRule(null);
+
       return;
     }
-    loadRuleDetailsIfNeeded(token, selectedRuleId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, selectedRuleId]);
 
-  async function selectLeagueAndGoMatches(l: any) {
+    setActiveSeasonId(selectedSeasonFilterId);
+    localStorage.setItem('activeSeasonId', selectedSeasonFilterId);
+    // Al cambiar evento, reseteamos selección de liga/regla
+    setSelectedLeagueId('');
+    setSelectedRuleId('');
+    setSelectedRule(null);
+
+    (async () => {
+      if (!token) return;
+
+      try {
+        // 0) Cargar conceptos por evento (Season) para UI de reglas personalizadas
+        const conceptRows = await getSeasonConcepts(token, selectedSeasonFilterId);
+        const nextConcepts =
+          (conceptRows ?? [])
+            .filter((x) => x?.code)
+            .map((x) => ({ code: x.code, label: (x.label ?? x.code) as string }));
+
+        const finalConcepts = nextConcepts.length ? nextConcepts : DEFAULT_CONCEPTS;
+        setConcepts(finalConcepts);
+
+        // reset inputs de puntos según conceptos del evento
+        const base = makePointsRecord(finalConcepts);
+        setCustomPoints(base);
+        setEditPoints(base);
+
+        // 1) Persistimos en backend el evento activo
+
+        // Si ya estamos en ese evento según /auth/me, no hace falta persistir otra vez
+        const current = meInfo?.activeSeason?.id ?? meInfo?.activeSeasonId ?? null;
+        if (current && current === selectedSeasonFilterId) return;
+        await setActiveSeason(token, selectedSeasonFilterId);
+
+        // 2) Refrescamos /auth/me para que TODO quede consistente
+        const m = await me(token, locale);
+        setMeInfo(m);
+        setActiveSeasonNameLabel(m?.activeSeason?.name ?? '—');
+
+        // 3) (Opcional pero recomendado) refrescar ligas
+        await refreshLeagues(token);
+      } catch (e: any) {
+        setError(friendlyErrorMessage(e));
+      }
+    })();
+
+  }, [selectedSeasonFilterId, token, locale]);
+
+  // ------------------------------------------------------------
+  // Reglas visibles en el combo:
+  // - Crear nueva liga: solo predeterminadas
+  // - Liga existente: predeterminadas + (si la liga usa custom) SOLO esa custom
+  // ------------------------------------------------------------
+  const isCustomRuleId = (id?: string | null) => !!id && id.startsWith('C');
+
+  const predefinedRuleOptions = useMemo(() => {
+    // Heurística: las custom creadas en backend usan ids tipo "C...."
+    // Todo lo demás lo tratamos como "predeterminada" para el dropdown.
+    return rules.filter((r: any) => !isCustomRuleId(r?.id));
+  }, [rules]);
+
+  const ruleOptionsForSelect = useMemo(() => {
+    // 1) Crear nueva liga => solo predeterminadas
+    if (selectedLeagueId === NEW_LEAGUE) return predefinedRuleOptions;
+
+    // 2) Liga existente => predeterminadas + (si aplica) la custom de ESA liga
+    const leagueRuleId: string | null | undefined = selectedLeague?.scoringRuleId;
+
+    if (isCustomRuleId(leagueRuleId)) {
+      const custom = rules.find((r: any) => r?.id === leagueRuleId);
+      if (custom) {
+        const merged = [...predefinedRuleOptions, custom];
+        // por si acaso, evitamos duplicados por id
+        const seen = new Set<string>();
+        return merged.filter((r: any) => {
+          if (!r?.id) return false;
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        });
+      }
+    }
+
+    return predefinedRuleOptions;
+  }, [rules, predefinedRuleOptions, selectedLeagueId, selectedLeague?.scoringRuleId]);
+
+  const canSaveLeagueRule = myLeagueRole === 'OWNER' || myLeagueRole === 'ADMIN';
+
+  const leagueRuleId: string | null | undefined = selectedLeague?.scoringRuleId;
+  const isLeagueCustomRule = isCustomRuleId(leagueRuleId);
+  const isEditingLeagueCustomRule =
+    selectedLeagueId !== '' &&
+    selectedLeagueId !== NEW_LEAGUE &&
+    canSaveLeagueRule &&
+    isLeagueCustomRule &&
+    selectedRuleId === leagueRuleId;
+
+  // Cuando la regla seleccionada es la custom de la liga, copiamos sus puntos a inputs editables
+  useEffect(() => {
+    if (!selectedRule) return;
+    if (!isEditingLeagueCustomRule) return;
+
+    const next: Record<string, string> = { ...editPoints };
+    for (const c of concepts) {
+      const pts = selectedRule.details?.find((d: any) => d.code === c.code)?.points ?? 0;
+      next[c.code] = String(pts);
+    }
+    setEditPoints(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRuleId, selectedRule, isEditingLeagueCustomRule]);
+
+  const pointsByCode = useMemo(() => {
+    const map = new Map<string, number>();
+    const details: ApiScoringRuleDetail[] = selectedRule?.details ?? [];
+    for (const d of details) map.set(d.code, d.points);
+    return map;
+  }, [selectedRule]);
+
+  // Helper: inferir sportId/competitionId buscando el seasonId dentro del catálogo
+  function inferSportCompetitionFromSeason(seasonId: string): { sportId: string; competitionId: string } {
+    for (const s of catalog) {
+      for (const c of s.competitions ?? []) {
+        const found = (c.seasons ?? []).some((se: any) => se.id === seasonId);
+        if (found) return { sportId: s.id, competitionId: c.id };
+      }
+    }
+    return { sportId: '', competitionId: '' };
+  }
+
+  function selectLeagueAndGoMatches(l: ApiLeague) {
+    // (A) Guardar "activos" tradicionales
     localStorage.setItem('activeLeagueId', l.id);
     localStorage.setItem('activeLeagueName', l.name);
 
-    // handoff para /matches (si tu socio lo usa)
+    // (B) Guardar contexto para que /matches precargue selects
     localStorage.setItem('matches_ctx_fromLeagues', '1');
-    localStorage.setItem('matches_ctx_leagueId', l.id);
-    localStorage.setItem('matches_ctx_seasonId', l.seasonId ?? '');
-    localStorage.setItem('matches_ctx_sportId', selectedSportId ?? '');
-    localStorage.setItem('matches_ctx_competitionId', selectedCompetitionId ?? '');
 
+    // seasonId: prioridad al filtro UI, si no existe, usar el seasonId de la liga
+    const seasonIdFromUi = selectedSeasonFilterId || (l as any)?.seasonId || '';
+
+    // sport/competition: prioridad a filtros UI, si faltan, inferir desde catálogo con el seasonId
+    let sportIdToSend = selectedSportId || '';
+    let compIdToSend = selectedCompetitionId || '';
+
+    if ((!sportIdToSend || !compIdToSend) && seasonIdFromUi) {
+      const inferred = inferSportCompetitionFromSeason(seasonIdFromUi);
+      sportIdToSend = sportIdToSend || inferred.sportId;
+      compIdToSend = compIdToSend || inferred.competitionId;
+    }
+
+    localStorage.setItem('matches_ctx_sportId', sportIdToSend);
+    localStorage.setItem('matches_ctx_competitionId', compIdToSend);
+    localStorage.setItem('matches_ctx_seasonId', seasonIdFromUi);
+    localStorage.setItem('matches_ctx_leagueId', l.id);
+
+    // (C) Ir a partidos
     router.push(`/${locale}/matches`);
   }
 
   async function onJoin() {
     if (!token) return;
-
     const code = joinCode.trim().toUpperCase();
     if (!code) {
-      setError('Escribe el código para unirte.');
+      setError('Escribe un código para unirte.');
       return;
     }
 
@@ -367,13 +564,17 @@ export default function LeaguesPage() {
       if (res?.leagueId) {
         setSelectedLeagueId(res.leagueId);
 
-        const joinedLeague = data?.find((l: any) => l.id === res.leagueId);
+        // Buscar la liga recién unida para obtener su seasonId
+        const joinedLeague = data?.find((l) => l.id === res.leagueId);
+
+        // Si existe seasonId, auto-setear filtros (Sport -> Competition -> Season)
         if (joinedLeague?.seasonId) {
           const seasonId = joinedLeague.seasonId;
 
           let foundSportId = '';
           let foundCompetitionId = '';
 
+          // catalog es CatalogSport[] (array), NO catalog.sports
           for (const s of catalog) {
             for (const c of s.competitions ?? []) {
               const matchSeason = (c.seasons ?? []).find((se: any) => se.id === seasonId);
@@ -386,27 +587,29 @@ export default function LeaguesPage() {
             if (foundSportId) break;
           }
 
+          // Set filtros UI (esto hará que la pantalla quede coherente con el código)
           setSelectedSportId(foundSportId);
           setSelectedCompetitionId(foundCompetitionId);
           setSelectedSeasonFilterId(seasonId);
 
+          // Persistir evento activo en backend + localStorage (usa tu flujo actual)
           setActiveSeasonId(seasonId);
           localStorage.setItem('activeSeasonId', seasonId);
 
+          // Actualiza backend (/auth/active-season) y refresca /me (con locale)
           await setActiveSeason(token, seasonId);
           const m = await me(token, locale);
           setMeInfo(m);
           setActiveSeasonNameLabel(m?.activeSeason?.name ?? 'Seleccionar');
         }
       }
-
-      router.push(`/${locale}/matches`);
     } catch (e: any) {
       setError(friendlyErrorMessage(e));
     } finally {
       setJoining(false);
     }
   }
+
 
   async function onSaveLeagueRule() {
     if (!token) return;
@@ -416,12 +619,13 @@ export default function LeaguesPage() {
     setInfo(null);
 
     try {
+      // 1) Validar selección
       if (!selectedLeagueId) {
         setError('Selecciona una liga o elige (CREAR NUEVA LIGA).');
         return;
       }
 
-      // crear liga al guardar
+      // 2) Crear nueva liga SOLO al guardar
       if (selectedLeagueId === NEW_LEAGUE) {
         if (!activeSeasonId) {
           setError('No hay un evento activo (Season). Ve al Dashboard y selecciona un evento.');
@@ -441,9 +645,16 @@ export default function LeaguesPage() {
             return;
           }
 
-          const details = parseAndValidateCustomPoints(customPoints, concepts);
+          // Validaciones de puntos (UI)
+          let details: Array<{ code: string; points: number }>;
+          try {
+            details = parseAndValidateCustomPoints(customPoints, concepts);
+          } catch (err: any) {
+            setError(String(err?.message || err));
+            return;
+          }
 
-          // crear regla custom
+          // 1) Crear regla personalizada en backend
           const resRule = await fetch(`${API_BASE}/scoring/rules/custom`, {
             method: 'POST',
             headers: {
@@ -540,38 +751,47 @@ export default function LeaguesPage() {
         return;
       }
 
-      // liga existente
+      // 3) Liga existente: asignar regla (requiere selectedRuleId)
       if (!selectedRuleId) {
         setError('Selecciona una regla para guardar.');
         return;
       }
 
+      // Permisos: solo OWNER/ADMIN de la liga puede cambiar la regla
       if (!canSaveLeagueRule) {
         setError('Solo el ADMIN/OWNER de esta liga puede cambiar la regla.');
         return;
       }
 
-      // editar custom rule sin cambiar scoringRuleId
+      // ✅ Si la liga tiene una regla personalizada (custom) y estás editándola,
+      // guardamos los puntos en la regla (sin cambiar scoringRuleId)
       if (isEditingLeagueCustomRule && isCustomRuleId(selectedRuleId)) {
-        const details = parseAndValidateCustomPoints(editPoints, concepts);
+        let details: Array<{ code: string; points: number }>;
+        try {
+          details = parseAndValidateCustomPoints(editPoints, concepts);
+        } catch (err: any) {
+          setError(String(err?.message || err));
+          return;
+        }
 
-        const resCustom = await fetch(
-          `${API_BASE}/leagues/${encodeURIComponent(selectedLeagueId)}/custom-rule`,
-          {
-            method: 'PATCH',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ details }),
-          }
-        );
+        const resCustom = await fetch(`${API_BASE}/leagues/${encodeURIComponent(selectedLeagueId)}/custom-rule`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            // name: selectedRule?.name, // opcional si luego quieres permitir editar nombre
+            details,
+          }),
+        });
 
         if (!resCustom.ok) {
           const text = await resCustom.text().catch(() => '');
           throw new Error(text || 'No se pudo guardar la regla personalizada.');
         }
 
+        // refrescar detalle visible
         const refreshed = await getScoringRule(token, selectedRuleId);
         setSelectedRule(refreshed);
 
@@ -601,32 +821,6 @@ export default function LeaguesPage() {
       setSavingLeagueRule(false);
     }
   }
-
-  const aiContext = useMemo(() => {
-    return {
-      page: 'leagues',
-      locale,
-      filters: {
-        sportId: selectedSportId,
-        competitionId: selectedCompetitionId,
-        seasonId: selectedSeasonFilterId,
-      },
-      activeSeasonId,
-      selectedLeagueId,
-      selectedRuleId,
-      leaguesCount: leaguesByEvent.length,
-      nowUtc: new Date().toISOString(),
-    };
-  }, [
-    locale,
-    selectedSportId,
-    selectedCompetitionId,
-    selectedSeasonFilterId,
-    activeSeasonId,
-    selectedLeagueId,
-    selectedRuleId,
-    leaguesByEvent.length,
-  ]);
 
   return (
     <div className="min-h-screen space-y-6">
@@ -700,6 +894,7 @@ export default function LeaguesPage() {
 
           {/* Filtros: Deporte -> Competición -> Evento */}
           <div className="grid md:grid-cols-3 gap-4">
+            {/* Deporte */}
             <div>
               <div className="text-sm text-[color:var(--muted)] mb-1">Deporte</div>
               <select
@@ -707,6 +902,7 @@ export default function LeaguesPage() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setSelectedSportId(v);
+                  // reset cascada
                   setSelectedCompetitionId('');
                   setSelectedSeasonFilterId('');
                 }}
@@ -714,6 +910,7 @@ export default function LeaguesPage() {
               >
                 <option value="">Seleccionar</option>
                 {sportOptions.map((s) => (
+
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
@@ -721,6 +918,7 @@ export default function LeaguesPage() {
               </select>
             </div>
 
+            {/* Competición */}
             <div>
               <div className="text-sm text-[color:var(--muted)] mb-1">Competición</div>
               <select
@@ -728,6 +926,7 @@ export default function LeaguesPage() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setSelectedCompetitionId(v);
+                  // reset cascada
                   setSelectedSeasonFilterId('');
                 }}
                 disabled={!selectedSportId}
@@ -735,13 +934,16 @@ export default function LeaguesPage() {
               >
                 <option value="">Seleccionar</option>
                 {competitionOptions.map((c) => (
+
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
                 ))}
+
               </select>
             </div>
 
+            {/* Evento */}
             <div>
               <div className="text-sm text-[color:var(--muted)] mb-1">Evento</div>
               <select
@@ -749,22 +951,27 @@ export default function LeaguesPage() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setSelectedSeasonFilterId(v);
+
+                  // UI inmediata: el texto visible del option seleccionado
                   const txt = e.target.selectedOptions?.[0]?.textContent?.trim();
-                  if (txt) setActiveSeasonNameLabel(txt.replace(/\s*\(.*\)\s*$/, ''));
+                  if (txt) setActiveSeasonNameLabel(txt.replace(/\s*\(.*\)\s*$/, '')); // quita "(slug)" si viene
                 }}
                 disabled={!selectedCompetitionId}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
               >
                 <option value="">Seleccionar</option>
-                {seasonOptions.map((se: any) => (
+                {seasonOptions.map((se) => (
+
                   <option key={se.id} value={se.id}>
                     {se.name} ({se.slug})
                   </option>
                 ))}
+
               </select>
             </div>
           </div>
 
+          {/* Hint */}
           {!filtersReady && (
             <div className="mt-3 text-sm text-[color:var(--muted)]">
               Selecciona <b>Deporte</b>, <b>Competición</b> y <b>Evento</b> para habilitar la selección de liga.
@@ -775,6 +982,7 @@ export default function LeaguesPage() {
 
           {/* Selección/creación de liga + reglas */}
           <div className="grid md:grid-cols-2 gap-4">
+            {/* Liga */}
             <div>
               <div className="text-sm text-[color:var(--muted)] mb-1">Liga</div>
               <select
@@ -791,16 +999,18 @@ export default function LeaguesPage() {
                     setNewLeagueName('');
                     setCustomRuleName('');
                     setCustomPoints(makePointsRecord(concepts));
+
                     setSelectedRuleId('');
                     setSelectedRule(null);
                   } else if (v === '') {
                     setSelectedRuleId('');
                     setSelectedRule(null);
                   } else {
-                    const found: any = leagues.find((x: any) => x.id === v);
+                    const found = leagues.find((x: any) => x.id === v) as any;
                     setSelectedRuleId(found?.scoringRuleId || '');
                   }
                 }}
+
                 disabled={!filtersReady}
 
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
@@ -850,6 +1060,7 @@ export default function LeaguesPage() {
               )}
             </div>
 
+            {/* Regla */}
             <div>
               <div className="text-sm text-[color:var(--muted)] mb-1">Regla</div>
 
@@ -873,6 +1084,7 @@ export default function LeaguesPage() {
                 </div>
               )}
 
+              {/* Predefinida (nuevo o existente) */}
               {(selectedLeagueId !== NEW_LEAGUE || newRuleMode === 'PREDEFINED') && (
                 <select
                   value={selectedRuleId}
@@ -889,6 +1101,7 @@ export default function LeaguesPage() {
                 </select>
               )}
 
+              {/* Personalizada (solo UI por ahora) */}
               {selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && (
                 <Card className="p-3">
                   <div className="text-xs text-[color:var(--muted)] mb-2">
@@ -922,6 +1135,7 @@ export default function LeaguesPage() {
             </div>
           </div>
 
+          {/* Detalle de regla (si hay seleccionada predefinida) */}
           {(selectedLeagueId && selectedLeagueId !== '' && (selectedLeagueId !== NEW_LEAGUE || newRuleMode === 'PREDEFINED')) && (
             <Card className="mt-5 p-3">
               <div className="text-sm font-semibold">Desglose</div>
@@ -931,7 +1145,8 @@ export default function LeaguesPage() {
 
               <div className="mt-3 space-y-2">
                 {concepts.map((c) => {
-                  const pts = selectedRule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
+                  const pts =
+                    selectedRule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
                   return (
                     <div key={c.code} className="flex items-center justify-between">
                       <div className="text-sm text-[var(--foreground)]">{c.label}</div>
@@ -952,6 +1167,7 @@ export default function LeaguesPage() {
             </Card>
           )}
 
+          {/* Guardar */}
           <div className="mt-5 flex flex-wrap gap-2 items-center">
             {(() => {
               const saveDisabled =
@@ -960,10 +1176,20 @@ export default function LeaguesPage() {
                 !eventSelected ||
                 !selectedLeagueId ||
                 selectedLeagueId === '' ||
+
+                // ✅ liga existente: si NO eres OWNER/ADMIN de la liga, deshabilitar
                 (selectedLeagueId !== NEW_LEAGUE && !canSaveLeagueRule) ||
+
+                // crear nueva liga: requiere nombre
                 (selectedLeagueId === NEW_LEAGUE && !newLeagueName.trim()) ||
+
+                // liga existente requiere regla
                 (selectedLeagueId !== '' && selectedLeagueId !== NEW_LEAGUE && !selectedRuleId) ||
+
+                // crear nueva con predefinida requiere regla
                 (selectedLeagueId === NEW_LEAGUE && newRuleMode === 'PREDEFINED' && !selectedRuleId) ||
+
+                // crear nueva con personalizada requiere nombre de regla
                 (selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && !customRuleName.trim());
 
               return (
@@ -996,9 +1222,7 @@ export default function LeaguesPage() {
           {loadingLeagues ? (
             <div className="p-4 text-zinc-300">Cargando…</div>
           ) : leaguesByEvent.length === 0 ? (
-            <div className="p-4 text-zinc-400">
-              No tienes ligas para este evento. Cambia el filtro de <b>Evento</b> o crea/únete a una liga.
-            </div>
+            <div className="p-4 text-zinc-400">No tienes ligas para este evento. Cambia el filtro de <b>Evento</b> o crea/únete a una liga.</div>
           ) : (
             <div className="divide-y divide-[var(--border)]">
               {leaguesByEvent.map((l: any) => (
@@ -1036,9 +1260,9 @@ export default function LeaguesPage() {
             </div>
           )}
         </Card>
+                {/* Chatbot IA */}
+        <AiChatWidget locale={locale} token={token} context={aiContext} />
       </div>
-
-      <AiChatWidget locale={locale} token={token} context={aiContext} />
     </div>
   );
 }
