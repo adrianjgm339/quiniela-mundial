@@ -180,14 +180,25 @@ export class MatchesService {
         homeTeam: {
           id: m.homeTeam.id,
           externalId: m.homeTeam.externalId,
+
+          // name "normal" (como hoy): traducción si existe, si no placeholderRule
           name: m.homeTeam.translations[0]?.name ?? m.homeTeam.placeholderRule ?? '',
+
+          // ✅ NUEVO: placeholder crudo SIEMPRE disponible para UI (modo pruebas)
+          placeholderRule: m.homeTeam.placeholderRule ?? null,
+
           flagKey: m.homeTeam.flagKey,
           isPlaceholder: m.homeTeam.isPlaceholder,
         },
         awayTeam: {
           id: m.awayTeam.id,
           externalId: m.awayTeam.externalId,
+
           name: m.awayTeam.translations[0]?.name ?? m.awayTeam.placeholderRule ?? '',
+
+          // ✅ NUEVO
+          placeholderRule: m.awayTeam.placeholderRule ?? null,
+
           flagKey: m.awayTeam.flagKey,
           isPlaceholder: m.awayTeam.isPlaceholder,
         },
@@ -396,13 +407,24 @@ export class MatchesService {
       const ext = m.externalId ?? '';
 
       // En vez de fallar todo el reset, saltamos los externalId inválidos
-      if (ext.length < 11) {
+      // Formato esperado: "F0x" + HOME + AWAY, donde HOME y AWAY tienen la MISMA longitud.
+      // Ej fútbol:  F0300910092  -> HOME=0091 (4), AWAY=0092 (4)
+      // Ej béisbol: F02CMB027CMB024 -> HOME=CMB027 (6), AWAY=CMB024 (6)
+      if (ext.length < 3 + 8) {
+        // mínimo: prefijo 3 + (4+4)
         skippedBadExternalId.push({ matchId: m.id, externalId: ext });
         continue;
       }
 
-      const homeExt = ext.slice(3, 7);
-      const awayExt = ext.slice(7, 11);
+      const payload = ext.slice(3); // todo lo que viene después de F0x
+      if (payload.length % 2 !== 0) {
+        skippedBadExternalId.push({ matchId: m.id, externalId: ext });
+        continue;
+      }
+
+      const half = payload.length / 2;
+      const homeExt = payload.slice(0, half);
+      const awayExt = payload.slice(half);
 
       if (!homeExt || !awayExt) {
         skippedBadExternalId.push({ matchId: m.id, externalId: ext });

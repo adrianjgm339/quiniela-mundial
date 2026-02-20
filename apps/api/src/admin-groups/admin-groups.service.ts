@@ -7,6 +7,8 @@ type TeamRow = {
     teamId: string;
     groupCode: string;
     name: string;
+    flagKey?: string | null;
+    isPlaceholder?: boolean;
     played: number;
     won: number;
     drawn: number;
@@ -449,7 +451,7 @@ export class AdminGroupsService {
             // Inicializar equipos del grupo desde Team table (para no depender de que haya matches ya)
             const groupTeams = await this.prisma.team.findMany({
                 where: { seasonId, groupCode },
-                select: { id: true, translations: true, groupCode: true, isPlaceholder: true },
+                select: { id: true, translations: true, groupCode: true, isPlaceholder: true, flagKey: true },
             });
 
             const rowsMap = new Map<string, TeamRow>();
@@ -458,6 +460,8 @@ export class AdminGroupsService {
                     teamId: t.id,
                     groupCode,
                     name: this.teamName(t, locale),
+                    flagKey: (t as any).flagKey ?? null,
+                    isPlaceholder: !!(t as any).isPlaceholder,
                     played: 0,
                     won: 0,
                     drawn: 0,
@@ -555,6 +559,8 @@ export class AdminGroupsService {
                         groupCode: g.groupCode,
                         teamId: third.teamId,
                         name: third.name,
+                        flagKey: (third as any).flagKey ?? null,
+                        isPlaceholder: !!(third as any).isPlaceholder,
                         points: third.points,
                         gd: third.gd,
                         gf: third.gf,

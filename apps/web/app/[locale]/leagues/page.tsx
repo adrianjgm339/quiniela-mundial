@@ -17,10 +17,26 @@ import {
   type ApiScoringRule,
   type ApiScoringRuleDetail,
 } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { PageHeader } from '@/components/ui/page-header';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3001';
 
 const NEW_LEAGUE = '__NEW__';
+
+const joinPolicyLabel = (p?: string) => {
+  switch ((p || '').toUpperCase()) {
+    case 'PUBLIC':
+      return 'Pública';
+    case 'APPROVAL':
+      return 'Con aprobación';
+    case 'PRIVATE':
+    default:
+      return 'Privada';
+  }
+};
 
 // Orden/labels UI (si un rule no trae algún code, lo mostramos en 0)
 const DEFAULT_CONCEPTS: Array<{ code: string; label: string }> = [
@@ -118,6 +134,7 @@ export default function LeaguesPage() {
 
   // Modo crear liga (solo aplica cuando selectedLeagueId === NEW_LEAGUE)
   const [newLeagueName, setNewLeagueName] = useState('');
+  const [newJoinPolicy, setNewJoinPolicy] = useState<'PUBLIC' | 'PRIVATE' | 'APPROVAL'>('PRIVATE');
   const [newRuleMode, setNewRuleMode] = useState<'PREDEFINED' | 'CUSTOM'>('PREDEFINED');
   const [customRuleName, setCustomRuleName] = useState('');
   const [customPoints, setCustomPoints] = useState<Record<string, string>>(makePointsRecord(DEFAULT_CONCEPTS));
@@ -481,9 +498,13 @@ export default function LeaguesPage() {
     setInfo(null);
 
     try {
-      const res = await joinLeagueByCode(token, { joinCode: code });
+      const res: any = await joinLeagueByCode(token, { joinCode: code });
       setJoinCode('');
-      setInfo('Te uniste a la liga.');
+      if (res?.pending) {
+        setInfo('Solicitud enviada. Espera aprobación del ADMIN/OWNER.');
+      } else {
+        setInfo('Te uniste a la liga.');
+      }
 
       const data = await refreshLeagues(token);
 
@@ -604,12 +625,26 @@ export default function LeaguesPage() {
           const ruleId = createdRule?.id as string | undefined;
           if (!ruleId) throw new Error('La regla personalizada no devolvió un ID.');
 
-          // 2) Crear liga ya con esa regla
-          const created = await createLeague(token, {
-            seasonId: activeSeasonId,
-            name,
-            scoringRuleId: ruleId,
+          const resCreate = await fetch(`${API_BASE}/leagues`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              seasonId: activeSeasonId,
+              name,
+              scoringRuleId: ruleId,
+              joinPolicy: newJoinPolicy,
+            }),
           });
+
+          if (!resCreate.ok) {
+            const text = await resCreate.text().catch(() => '');
+            throw new Error(text || 'No se pudo crear la liga.');
+          }
+
+          const created = await resCreate.json();
 
           await refreshLeagues(token);
           setSelectedLeagueId(created.id);
@@ -631,11 +666,26 @@ export default function LeaguesPage() {
         }
 
         // Crear liga YA con regla (obligatoria)
-        const created = await createLeague(token, {
-          seasonId: activeSeasonId,
-          name,
-          scoringRuleId: selectedRuleId,
+        const resCreate = await fetch(`${API_BASE}/leagues`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            seasonId: activeSeasonId,
+            name,
+            scoringRuleId: selectedRuleId,
+            joinPolicy: newJoinPolicy,
+          }),
         });
+
+        if (!resCreate.ok) {
+          const text = await resCreate.text().catch(() => '');
+          throw new Error(text || 'No se pudo crear la liga.');
+        }
+
+        const created = await resCreate.json();
 
         await refreshLeagues(token);
         setSelectedLeagueId(created.id);
@@ -720,37 +770,27 @@ export default function LeaguesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
+    <div className="min-h-screen space-y-6">
+      <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-semibold">Ligas</h1>
-            <div className="mt-1 text-zinc-400">
-              Evento activo:{' '}
-              <span className="text-zinc-200">
-                <b>{activeSeasonNameLabel}</b>
-              </span>
-
-              {/* opcional: si quieres seguir viendo el id en pequeño */}
-              {/*{activeSeasonId && (
-                <span className="text-zinc-500"> · ({activeSeasonId})</span>
-              )}*/}
-            </div>
-          </div>
-
-          <button
-            onClick={() => router.push(`/${locale}/dashboard`)}
-            className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium"
-          >
-            Volver
-          </button>
-        </div>
+        <PageHeader
+          title="Ligas"
+          subtitle={
+            <span>
+              Evento activo: <b>{activeSeasonNameLabel}</b>
+            </span>
+          }
+          actions={
+            <Button variant="secondary" onClick={() => router.push(`/${locale}/dashboard`)}>
+              Volver
+            </Button>
+          }
+        />
 
         {!token && (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 text-zinc-300">
+          <Card className="p-4 text-[color:var(--muted)]">
             Cargando sesión…
-          </div>
+          </Card>
         )}
 
         {!activeSeasonId && token && (
@@ -772,39 +812,38 @@ export default function LeaguesPage() {
         )}
 
         {/* Gestión de ligas (unificado) */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <Card className="p-5">
           <div className="text-lg font-semibold">Gestionar ligas</div>
-          <div className="text-sm text-zinc-400 mt-1">
+          <div className="text-sm text-[color:var(--muted)] mt-1">
             Unirte por código o seleccionar/crear liga y definir su regla.
           </div>
 
           {/* Unirse por código */}
           <div className="mt-4">
-            <div className="text-sm text-zinc-400 mb-1">Unirse por código</div>
+            <div className="text-sm text-[color:var(--muted)] mb-1">Unirse por código</div>
             <div className="flex flex-wrap gap-2">
               <input
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value)}
                 placeholder="Código (ej: ABC123)"
-                className="flex-1 min-w-[220px] rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 min-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)] disabled:opacity-50 disabled:cursor-not-allowed"
               />
-              <button
+              <Button
                 onClick={onJoin}
                 disabled={joining || !joinCode.trim()}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {joining ? 'Uniéndome…' : 'Unirme'}
-              </button>
+              </Button>
             </div>
           </div>
 
-          <div className="my-5 h-px bg-zinc-800" />
+          <div className="my-5 h-px bg-[var(--border)]" />
 
           {/* Filtros: Deporte -> Competición -> Evento */}
           <div className="grid md:grid-cols-3 gap-4">
             {/* Deporte */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Deporte</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Deporte</div>
               <select
                 value={selectedSportId}
                 onChange={(e) => {
@@ -814,7 +853,7 @@ export default function LeaguesPage() {
                   setSelectedCompetitionId('');
                   setSelectedSeasonFilterId('');
                 }}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
               >
                 <option value="">Seleccionar</option>
                 {sportOptions.map((s) => (
@@ -828,7 +867,7 @@ export default function LeaguesPage() {
 
             {/* Competición */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Competición</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Competición</div>
               <select
                 value={selectedCompetitionId}
                 onChange={(e) => {
@@ -838,7 +877,7 @@ export default function LeaguesPage() {
                   setSelectedSeasonFilterId('');
                 }}
                 disabled={!selectedSportId}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 disabled:opacity-50"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
               >
                 <option value="">Seleccionar</option>
                 {competitionOptions.map((c) => (
@@ -853,7 +892,7 @@ export default function LeaguesPage() {
 
             {/* Evento */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Evento</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Evento</div>
               <select
                 value={selectedSeasonFilterId}
                 onChange={(e) => {
@@ -865,7 +904,7 @@ export default function LeaguesPage() {
                   if (txt) setActiveSeasonNameLabel(txt.replace(/\s*\(.*\)\s*$/, '')); // quita "(slug)" si viene
                 }}
                 disabled={!selectedCompetitionId}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 disabled:opacity-50"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
               >
                 <option value="">Seleccionar</option>
                 {seasonOptions.map((se) => (
@@ -881,18 +920,18 @@ export default function LeaguesPage() {
 
           {/* Hint */}
           {!filtersReady && (
-            <div className="mt-3 text-sm text-zinc-400">
+            <div className="mt-3 text-sm text-[color:var(--muted)]">
               Selecciona <b>Deporte</b>, <b>Competición</b> y <b>Evento</b> para habilitar la selección de liga.
             </div>
           )}
 
-          <div className="my-5 h-px bg-zinc-800" />
+          <div className="my-5 h-px bg-[var(--border)]" />
 
           {/* Selección/creación de liga + reglas */}
           <div className="grid md:grid-cols-2 gap-4">
             {/* Liga */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Liga</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Liga</div>
               <select
                 value={selectedLeagueId}
                 onChange={(e) => {
@@ -921,32 +960,48 @@ export default function LeaguesPage() {
 
                 disabled={!filtersReady}
 
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 disabled:opacity-50"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
 
               >
                 <option value="">Seleccionar</option>
                 <option value={NEW_LEAGUE}>(CREAR NUEVA LIGA)</option>
                 {leaguesByEvent.map((l: any) => (
                   <option key={l.id} value={l.id}>
-                    {l.name} {l.myRole ? `(${l.myRole})` : ''}
+                    {l.name} [{joinPolicyLabel((l as any).joinPolicy)}] {l.myRole ? `(${l.myRole})` : ''}
                   </option>
                 ))}
               </select>
 
               {selectedLeagueId === NEW_LEAGUE && (
                 <div className="mt-3">
-                  <div className="text-sm text-zinc-400 mb-1">Nombre de la nueva liga</div>
+                  <div className="text-sm text-[color:var(--muted)] mb-1">Nombre de la nueva liga</div>
                   <input
                     value={newLeagueName}
                     onChange={(e) => setNewLeagueName(e.target.value)}
                     placeholder="Ej: Liga de la Oficina"
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
                   />
+                  <div className="mt-3">
+                    <div className="text-sm text-[color:var(--muted)] mb-1">Tipo de liga</div>
+                    <select
+                      value={newJoinPolicy}
+                      onChange={(e) => setNewJoinPolicy(e.target.value as any)}
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
+                    >
+                      <option value="PRIVATE">Privada (solo con código)</option>
+                      <option value="PUBLIC">Pública (cualquiera puede unirse)</option>
+                      <option value="APPROVAL">Con aprobación (solicitud)</option>
+                    </select>
+
+                    <div className="mt-2 text-xs text-zinc-500">
+                      Privada: requiere código · Pública: aparece en listado · Con aprobación: aparece y solicita al admin.
+                    </div>
+                  </div>
                 </div>
               )}
 
               {selectedLeagueId === '' && (
-                <div className="mt-3 text-sm text-zinc-400">
+                <div className="mt-3 text-sm text-[color:var(--muted)]">
                   Selecciona una liga para ver su regla, o elige <b>(CREAR NUEVA LIGA)</b>.
                 </div>
               )}
@@ -954,28 +1009,25 @@ export default function LeaguesPage() {
 
             {/* Regla */}
             <div>
-              <div className="text-sm text-zinc-400 mb-1">Regla</div>
+              <div className="text-sm text-[color:var(--muted)] mb-1">Regla</div>
 
               {selectedLeagueId === NEW_LEAGUE && (
                 <div className="mb-3 flex gap-2">
-                  <button
+                  <Button
+                    size="sm"
+                    variant={newRuleMode === 'PREDEFINED' ? 'primary' : 'outline'}
                     onClick={() => setNewRuleMode('PREDEFINED')}
-                    className={`px-3 py-2 rounded-xl border ${newRuleMode === 'PREDEFINED'
-                      ? 'border-emerald-700 bg-emerald-950/30 text-emerald-200'
-                      : 'border-zinc-800 bg-zinc-950 text-zinc-200'
-                      }`}
                   >
                     Predefinida
-                  </button>
-                  <button
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant={newRuleMode === 'CUSTOM' ? 'primary' : 'outline'}
                     onClick={() => setNewRuleMode('CUSTOM')}
-                    className={`px-3 py-2 rounded-xl border ${newRuleMode === 'CUSTOM'
-                      ? 'border-emerald-700 bg-emerald-950/30 text-emerald-200'
-                      : 'border-zinc-800 bg-zinc-950 text-zinc-200'
-                      }`}
                   >
                     Personalizada
-                  </button>
+                  </Button>
                 </div>
               )}
 
@@ -985,7 +1037,7 @@ export default function LeaguesPage() {
                   value={selectedRuleId}
                   onChange={(e) => setSelectedRuleId(e.target.value)}
                   disabled={!filtersReady || !selectedLeagueId || selectedLeagueId === ''}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 disabled:opacity-50"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
                 >
                   <option value="">— Selecciona una regla —</option>
                   {ruleOptionsForSelect.map((r: any) => (
@@ -998,43 +1050,43 @@ export default function LeaguesPage() {
 
               {/* Personalizada (solo UI por ahora) */}
               {selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && (
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-                  <div className="text-xs text-zinc-400 mb-2">
+                <Card className="p-3">
+                  <div className="text-xs text-[color:var(--muted)] mb-2">
                     Regla personalizada por liga. Los conceptos y validaciones dependen del evento seleccionado.
                   </div>
 
-                  <div className="text-sm text-zinc-400 mb-1">Nombre de la regla personalizada</div>
+                  <div className="text-sm text-[color:var(--muted)] mb-1">Nombre de la regla personalizada</div>
                   <input
                     value={customRuleName}
                     onChange={(e) => setCustomRuleName(e.target.value)}
                     placeholder="Ej: Mi regla pro"
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
                   />
 
-                  <div className="mt-3 text-sm text-zinc-400 mb-2">Puntos por concepto</div>
+                  <div className="mt-3 text-sm text-[color:var(--muted)] mb-2">Puntos por concepto</div>
                   <div className="space-y-2">
                     {concepts.map((c) => (
                       <div key={c.code} className="flex items-center justify-between gap-3">
-                        <div className="text-sm text-zinc-200">{c.label}</div>
+                        <div className="text-sm text-[var(--foreground)]">{c.label}</div>
                         <input
                           value={customPoints[c.code] ?? '0'}
                           onChange={(e) => setCustomPoints((prev) => ({ ...prev, [c.code]: e.target.value }))}
-                          className="w-24 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-right"
+                          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-right text-[var(--foreground)]"
                           inputMode="numeric"
                         />
                       </div>
                     ))}
                   </div>
-                </div>
+                </Card>
               )}
             </div>
           </div>
 
           {/* Detalle de regla (si hay seleccionada predefinida) */}
           {(selectedLeagueId && selectedLeagueId !== '' && (selectedLeagueId !== NEW_LEAGUE || newRuleMode === 'PREDEFINED')) && (
-            <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+            <Card className="mt-5 p-3">
               <div className="text-sm font-semibold">Desglose</div>
-              <div className="text-xs text-zinc-400 mt-1">
+              <div className="text-xs text-[color:var(--muted)] mt-1">
                 {loadingRuleDetails ? 'Cargando detalle…' : selectedRule ? selectedRule.name : '—'}
               </div>
 
@@ -1044,12 +1096,12 @@ export default function LeaguesPage() {
                     selectedRule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
                   return (
                     <div key={c.code} className="flex items-center justify-between">
-                      <div className="text-sm text-zinc-200">{c.label}</div>
+                      <div className="text-sm text-[var(--foreground)]">{c.label}</div>
                       {isEditingLeagueCustomRule ? (
                         <input
                           value={editPoints[c.code] ?? '0'}
                           onChange={(e) => setEditPoints((prev) => ({ ...prev, [c.code]: e.target.value }))}
-                          className="w-24 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-right"
+                          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-right text-[var(--foreground)]"
                           inputMode="numeric"
                         />
                       ) : (
@@ -1059,7 +1111,7 @@ export default function LeaguesPage() {
                   );
                 })}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Guardar */}
@@ -1089,18 +1141,12 @@ export default function LeaguesPage() {
 
               return (
                 <>
-                  <button
+                  <Button
                     onClick={onSaveLeagueRule}
                     disabled={saveDisabled}
-                    className={[
-                      'px-4 py-2 rounded-xl font-medium transition',
-                      saveDisabled
-                        ? '!cursor-not-allowed bg-zinc-700/60 text-zinc-300 opacity-60 hover:bg-zinc-700/60'
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
-                    ].join(' ')}
                   >
                     {savingLeagueRule ? 'Guardando…' : 'Guardar Liga/Regla'}
-                  </button>
+                  </Button>
 
                   {selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && (
                     <div className="text-sm text-amber-200">
@@ -1111,13 +1157,13 @@ export default function LeaguesPage() {
               );
             })()}
           </div>
-        </div>
+        </Card>
 
         {/* Mis ligas */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
-          <div className="px-4 py-3 border-b border-zinc-800 font-medium flex items-center justify-between">
+        <Card className="overflow-hidden">
+          <div className="px-4 py-3 border-b border-[var(--border)] font-medium flex items-center justify-between">
             <div>Mis ligas</div>
-            <div className="text-sm text-zinc-400">{leaguesByEvent.length} liga(s)</div>
+            <div className="text-sm text-[color:var(--muted)]">{leaguesByEvent.length} liga(s)</div>
           </div>
 
           {loadingLeagues ? (
@@ -1125,12 +1171,17 @@ export default function LeaguesPage() {
           ) : leaguesByEvent.length === 0 ? (
             <div className="p-4 text-zinc-400">No tienes ligas para este evento. Cambia el filtro de <b>Evento</b> o crea/únete a una liga.</div>
           ) : (
-            <div className="divide-y divide-zinc-800">
+            <div className="divide-y divide-[var(--border)]">
               {leaguesByEvent.map((l: any) => (
                 <div key={l.id} className="p-4 flex items-center justify-between gap-3">
                   <div>
-                    <div className="font-medium">{l.name}</div>
-                    <div className="text-sm text-zinc-400">
+                    <div className="font-medium flex items-center gap-2">
+                      <span>{l.name}</span>
+                      <Badge>
+                        {joinPolicyLabel((l as any).joinPolicy)}
+                      </Badge>
+                    </div>
+                    <div className="text-sm text-[color:var(--muted)]">
                       Código: <span className="text-zinc-200">{l.joinCode}</span>
                       {' · '}
                       Regla: <span className="text-zinc-200">{l.scoringRuleId ?? '—'}</span>
@@ -1138,25 +1189,24 @@ export default function LeaguesPage() {
                   </div>
 
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => router.push(`/${locale}/leagues/${l.id}/settings`)}
-                      className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium"
-                    >
-                      Configurar
-                    </button>
+                    {(l.myRole === 'OWNER' || l.myRole === 'ADMIN') && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => router.push(`/${locale}/leagues/${l.id}/settings`)}
+                      >
+                        Configurar
+                      </Button>
+                    )}
 
-                    <button
-                      onClick={() => selectLeagueAndGoMatches(l)}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-medium"
-                    >
+                    <Button onClick={() => selectLeagueAndGoMatches(l)}>
                       Entrar
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );
