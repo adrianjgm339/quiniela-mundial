@@ -1,6 +1,7 @@
 "use client";
 
 import Script from "next/script";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { googleLogin as apiGoogleLogin, login as apiLogin } from "@/lib/api";
@@ -16,7 +17,6 @@ export default function LoginPage() {
     return e.trim().toLowerCase();
   }, [searchParams]);
 
-  const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState(prefilledEmail);
   const [password, setPassword] = useState("");
 
@@ -29,7 +29,7 @@ export default function LoginPage() {
   // Debug útil: confirma qué Client ID está usando realmente el frontend
   useEffect(() => {
     // OJO: esto imprime el ID completo en consola (solo dev)
-    console.log("GOOGLE_CLIENT_ID (frontend):", googleClientId);
+    //console.log("GOOGLE_CLIENT_ID (frontend):", googleClientId);
   }, [googleClientId]);
 
   async function onGoogleCredential(idToken: string) {
@@ -44,24 +44,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    if (prefilledEmail) setStep(2);
-  }, [prefilledEmail]);
-
-  async function onContinue(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    const normalized = (email || "").trim().toLowerCase();
-    setEmail(normalized);
-
-    if (!normalized) {
-      setError("Ingresa tu email.");
-      return;
-    }
-    setStep(2);
   }
 
   async function onLogin(e: React.FormEvent) {
@@ -114,65 +96,71 @@ export default function LoginPage() {
         />
       ) : null}
 
-      <div style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
-        <h1>Iniciar sesión</h1>
+      <div className="relative z-0 min-h-[calc(100vh-64px)] bg-[var(--background)] text-[var(--foreground)] flex items-center justify-center px-4 py-10">
+        <div className="fixed inset-0 z-0 pointer-events-none">
+          {/* Desktop */}
+          <Image
+            src="/login-bg/wbc-desktop.jpg"
+            alt=""
+            fill
+            priority
+            sizes="100vw"
+            className="hidden md:block object-cover"
+          />
 
-        {/* Debug visual temporal */}
-        <p style={{ opacity: 0.7, fontSize: 12, marginTop: 8 }}>
-          Google Client ID: {googleClientId ? "OK" : "VACÍO"} | Script:{" "}
-          {googleReady ? "OK" : "CARGANDO"}
-        </p>
+          {/* Mobile */}
+          <Image
+            src="/login-bg/wbc-mobile.jpg"
+            alt=""
+            fill
+            priority
+            sizes="100vw"
+            className="md:hidden object-cover"
+          />
 
-        {step === 1 ? (
-          <form
-            onSubmit={onContinue}
-            style={{ display: "grid", gap: 12, marginTop: 12 }}
-          >
-            <label style={{ display: "grid", gap: 6 }}>
-              Email
+          {/* Overlay para legibilidad del card */}
+          <div className="absolute inset-0 bg-[var(--background)]/70 dark:bg-black/50" />
+        </div>
+        {/*<div className="relative z-10 w-full max-w-[440px] rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm p-6"> comentado Adr */}
+        <div className="relative z-10 w-full max-w-[440px] rounded-2xl border border-[var(--border)] bg-[var(--card)] dark:bg-[var(--card)] dark:bg-[#18181b] shadow-sm p-6">
+          <h1 className="text-xl font-semibold text-[var(--foreground)] text-center">Iniciar sesión</h1>
+
+          <form onSubmit={onLogin} className="mt-6 grid gap-4">
+            <label className="grid gap-2">
+              <span className="text-sm font-medium text-[var(--foreground)]">Email</span>
               <input
                 type="email"
                 value={email}
                 autoComplete="email"
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                className="h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </label>
 
-            {error ? <p style={{ color: "crimson", margin: 0 }}>{error}</p> : null}
-
-            <button type="submit">Continuar</button>
-          </form>
-        ) : (
-          <form
-            onSubmit={onLogin}
-            style={{ display: "grid", gap: 12, marginTop: 12 }}
-          >
-            <label style={{ display: "grid", gap: 6 }}>
-              Email
-              <input
-                type="email"
-                value={email}
-                autoComplete="email"
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: 6 }}>
-              Clave
+            <label className="grid gap-2">
+              <span className="text-sm font-medium text-[var(--foreground)]">Clave</span>
               <input
                 type="password"
                 value={password}
                 autoComplete="current-password"
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                className="h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </label>
 
-            {error ? <p style={{ color: "crimson", margin: 0 }}>{error}</p> : null}
+            {error ? (
+              <div className="rounded-xl border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 p-3 text-sm text-[var(--destructive)]">
+                {error}
+              </div>
+            ) : null}
 
-            <button type="submit" disabled={loading}>
+            <button
+              type="submit"
+              disabled={loading}
+              className="h-10 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--accent-foreground)] disabled:opacity-50"
+            >
               {loading ? "Entrando..." : "Entrar"}
             </button>
 
@@ -181,52 +169,33 @@ export default function LoginPage() {
                 type="button"
                 disabled={loading || !googleReady}
                 onClick={onGoogleClick}
-                style={{ opacity: 0.95 }}
+                className="h-10 rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--muted)] disabled:opacity-50"
               >
                 Continuar con Google
               </button>
             ) : null}
 
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              disabled={loading}
-              style={{ opacity: 0.9 }}
-            >
-              Cambiar email
-            </button>
-
-            <div style={{ marginTop: 6 }}>
+            <div className="mt-2 grid gap-2 justify-items-center">
               <button
                 type="button"
-                onClick={() =>
-                  router.push(
-                    `/${locale}/register?email=${encodeURIComponent(email)}`
-                  )
-                }
+                onClick={() => router.push(`/${locale}/register?email=${encodeURIComponent(email)}`)}
                 disabled={loading}
-                style={{ opacity: 0.9 }}
+                className="text-sm text-[var(--foreground)]/80 hover:underline disabled:opacity-50 w-fit inline-flex cursor-pointer"
               >
                 No tengo cuenta → Registrarme
               </button>
-            </div>
 
-            <div style={{ marginTop: 6 }}>
               <button
                 type="button"
-                onClick={() =>
-                  router.push(
-                    `/${locale}/forgot-password?email=${encodeURIComponent(email)}`
-                  )
-                }
+                onClick={() => router.push(`/${locale}/forgot-password?email=${encodeURIComponent(email)}`)}
                 disabled={loading}
-                style={{ opacity: 0.9 }}
+                className="text-sm text-[var(--foreground)]/80 hover:underline disabled:opacity-50 w-fit inline-flex cursor-pointer"
               >
                 Olvidé mi contraseña
               </button>
             </div>
           </form>
-        )}
+        </div>
       </div>
     </>
   );

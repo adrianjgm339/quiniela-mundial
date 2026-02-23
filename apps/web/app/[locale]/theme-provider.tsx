@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-type Theme = "system" | "dark" | "light";
+type Theme = "dark" | "light";
 
 type ThemeCtx = {
     theme: Theme;
@@ -14,36 +14,26 @@ const Ctx = createContext<ThemeCtx | null>(null);
 function applyTheme(t: Theme) {
     const root = document.documentElement;
     root.classList.remove("dark", "light");
-
-    if (t === "system") {
-        const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
-        root.classList.add(prefersDark ? "dark" : "light");
-        return;
-    }
-
     root.classList.add(t);
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-    const [theme, setThemeState] = useState<Theme>("system");
+    const [theme, setThemeState] = useState<Theme>("light");
 
     useEffect(() => {
         // init
-        const saved = (localStorage.getItem("qm_theme") as Theme | null) || "system";
-        setThemeState(saved);
-        applyTheme(saved);
+        const raw = (localStorage.getItem("qm_theme") as any) || "light";
 
-        // react to system changes only when theme=system
-        const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-        if (!mq) return;
+        // Migración: si estaba en "system", resolvemos a dark/light una vez y lo guardamos.
+        const resolved: Theme =
+            raw === "system"
+                ? (window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light")
+                : (raw === "dark" ? "dark" : "light");
 
-        const handler = () => {
-            const current = (localStorage.getItem("qm_theme") as Theme | null) || "system";
-            if (current === "system") applyTheme("system");
-        };
+        localStorage.setItem("qm_theme", resolved);
+        setThemeState(resolved);
+        applyTheme(resolved);
 
-        mq.addEventListener?.("change", handler);
-        return () => mq.removeEventListener?.("change", handler);
     }, []);
 
     const setTheme = (t: Theme) => {
