@@ -122,7 +122,7 @@ export default function LoginPage() {
           <div className="absolute inset-0 bg-[var(--background)]/70 dark:bg-black/50" />
         </div>
         {/*<div className="relative z-10 w-full max-w-[440px] rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm p-6"> comentado Adr */}
-        <div className="relative z-10 w-full max-w-[440px] rounded-2xl border border-[var(--border)] bg-[var(--card)] dark:bg-[var(--card)] dark:bg-[#18181b] shadow-sm p-6">
+        <div className="relative z-10 w-full max-w-[440px] rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm p-6">
           <h1 className="text-xl font-semibold text-[var(--foreground)] text-center">Iniciar sesión</h1>
 
           <form onSubmit={onLogin} className="mt-6 grid gap-4">

@@ -34,14 +34,14 @@ html.dark {
   --background: #0a0a0a;
   --foreground: #ededed;
 
-  --card: rgba(24, 24, 27, 0.55);
+  --card: #18181b;
   --border: rgba(255, 255, 255, 0.10);
   --muted: rgba(255, 255, 255, 0.55);
 
   --accent: #10b981;
   --accent-foreground: #0a0a0a;
 
-    /* Estados (global UI) */
+  /* Estados (global UI) */
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
 
