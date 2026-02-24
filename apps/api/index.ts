@@ -35,5 +35,16 @@ async function bootstrap() {
 
 export default async function handler(req: any, res: any) {
     const server = await bootstrap();
+
+    res.setHeader('Access-Control-Allow-Origin', 'https://quiniela-mundial-web.vercel.app');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+        res.statusCode = 204;
+        return res.end();
+    }
+
     return server(req, res);
 }
