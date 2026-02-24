@@ -1,50 +1,42 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './src/app.module';
 
-let cachedHandler: any;
+let cachedServer: any;
 
 async function bootstrap() {
-    if (cachedHandler) return cachedHandler;
+    if (cachedServer) return cachedServer;
 
     const app = await NestFactory.create(AppModule, { logger: false });
-    app.enableCors({
-        origin: (origin, callback) => {
-            if (!origin) return callback(null, true); // curl/postman
-            if (
-                origin === 'https://quiniela-mundial-web.vercel.app' ||
-                origin.endsWith('.vercel.app') ||
-                origin.startsWith('http://localhost:')
-            ) {
-                return callback(null, true);
-            }
-            return callback(new Error(`CORS blocked for origin: ${origin}`), false);
-        },
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization'],
-        credentials: true,
-        maxAge: 86400,
-    });
-
     await app.init();
 
-    // Nest usa Express por defecto
-    const server = app.getHttpAdapter().getInstance();
-    cachedHandler = server;
-    return cachedHandler;
+    cachedServer = app.getHttpAdapter().getInstance(); // express instance
+    return cachedServer;
 }
 
-export default async function handler(req: any, res: any) {
-    const server = await bootstrap();
+function setCors(res: any, origin?: string) {
+    const allowed =
+        origin === 'https://quiniela-mundial-web.vercel.app' ||
+        (origin && origin.endsWith('.vercel.app')) ||
+        (origin && origin.startsWith('http://localhost:'));
 
-    res.setHeader('Access-Control-Allow-Origin', 'https://quiniela-mundial-web.vercel.app');
+    if (allowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+    }
+
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+export default async function handler(req: any, res: any) {
+    setCors(res, req.headers?.origin);
 
     if (req.method === 'OPTIONS') {
         res.statusCode = 204;
         return res.end();
     }
 
+    const server = await bootstrap();
     return server(req, res);
 }
