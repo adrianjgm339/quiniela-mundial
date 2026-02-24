@@ -14,10 +14,14 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({
-    origin: ['http://localhost:3000'],
-    credentials: true,
+    origin: [
+      'https://quiniela-mundial-web.vercel.app',
+      'http://localhost:3000',
+    ],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Authorization',
+    credentials: true, // solo si usas cookies
   });
-
 
   await app.listen(3001);
   console.log(`API running on http://localhost:3001`);
