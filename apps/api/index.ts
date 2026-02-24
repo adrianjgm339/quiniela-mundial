@@ -8,8 +8,21 @@ async function bootstrap() {
 
     const app = await NestFactory.create(AppModule, { logger: false });
     app.enableCors({
-        origin: true,
+        origin: (origin, callback) => {
+            if (!origin) return callback(null, true); // curl/postman
+            if (
+                origin === 'https://quiniela-mundial-web.vercel.app' ||
+                origin.endsWith('.vercel.app') ||
+                origin.startsWith('http://localhost:')
+            ) {
+                return callback(null, true);
+            }
+            return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+        },
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
         credentials: true,
+        maxAge: 86400,
     });
 
     await app.init();
