@@ -43,6 +43,7 @@ function setCors(req: any, res: any) {
 
 export default async function handler(req: any, res: any) {
     setCors(req, res);
+    res.setHeader('X-CORS-HANDLER', 'index-ts');
 
     if (req.method === 'OPTIONS') {
         res.statusCode = 204;
