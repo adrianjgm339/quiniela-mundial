@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
-import { type Locale } from "../../i18n/routing";
 import { ThemeProvider } from "./theme-provider";
 import { AppShell } from "./app-shell";
+import { PostHogProvider } from "./posthog-provider";
 
 export default async function LocaleLayout({
   children,
@@ -13,16 +13,19 @@ export default async function LocaleLayout({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  const safeLocale = locale === 'es' || locale === 'en' ? locale : 'es';
+  const safeLocale = locale === "es" || locale === "en" ? locale : "es";
 
-  setRequestLocale(locale);
+  // Usa safeLocale para evitar inconsistencias
+  setRequestLocale(safeLocale);
   const messages = await getMessages();
 
   return (
     <NextIntlClientProvider messages={messages}>
-      <ThemeProvider>
-        <AppShell>{children}</AppShell>
-      </ThemeProvider>
+      <PostHogProvider>
+        <ThemeProvider>
+          <AppShell>{children}</AppShell>
+        </ThemeProvider>
+      </PostHogProvider>
     </NextIntlClientProvider>
   );
 }

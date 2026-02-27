@@ -458,3 +458,31 @@ model SeasonScoringConcept {
   @@unique([seasonId, code])
   @@index([seasonId])
 }
+
+enum WaitlistInterest {
+  SOCCER
+  BASEBALL
+  BOTH
+}
+
+model Waitlist {
+  id         String           @id @default(cuid())
+  email      String           @unique
+  phone      String?
+  name       String?
+  interest   WaitlistInterest @default(BOTH)
+
+  locale     String?
+  source     String?
+  referrer   String?
+  path       String?
+
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
