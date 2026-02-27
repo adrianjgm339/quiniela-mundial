@@ -15,6 +15,7 @@ import { ScoringModule } from './scoring/scoring.module';
 import { LeaderboardsModule } from './leaderboards/leaderboards.module';
 import { AdminGroupsModule } from './admin-groups/admin-groups.module';
 import { AiModule } from './ai/ai.module';
+import { WaitlistModule } from './waitlist/waitlist.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { AiModule } from './ai/ai.module';
     LeaderboardsModule,
     AdminGroupsModule,
     AiModule,
+    WaitlistModule,
   ],
   controllers: [AppController],
   providers: [AppService],
