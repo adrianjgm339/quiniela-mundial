@@ -116,6 +116,29 @@ function computeKoGanadorFinal(rule: RuleMap, match: any, pick: any, score: Scor
   return actualAdvanceTeamId === predictedAdvanceTeamId ? koPts : 0;
 }
 
+function computeBreakdown(rule: RuleMap, match: any, pick: any, score: Score): { total: number; byCode: Record<string, number> } {
+  const byCode: Record<string, number> = {};
+
+  const exact = pick.homePred === score.home && pick.awayPred === score.away;
+  const resultOk = outcome(pick.homePred, pick.awayPred) === outcome(score.home, score.away);
+  const diffOk = (pick.homePred - pick.awayPred) === (score.home - score.away);
+  const homeOk = pick.homePred === score.home;
+  const awayOk = pick.awayPred === score.away;
+
+  if (exact) byCode['EXACTO'] = rule['EXACTO'] ?? 0;
+  if (!exact && resultOk) byCode['RESULTADO'] = rule['RESULTADO'] ?? 0;
+  if (diffOk) byCode['BONUS_DIF'] = rule['BONUS_DIF'] ?? 0;
+  if (homeOk) byCode['GOLES_LOCAL'] = rule['GOLES_LOCAL'] ?? 0;
+  if (awayOk) byCode['GOLES_VISITA'] = rule['GOLES_VISITA'] ?? 0;
+
+  // KO (solo si aplica y existe la regla)
+  const koPts = computeKoGanadorFinal(rule, match, pick, score);
+  if (koPts) byCode['KO_GANADOR_FINAL'] = koPts;
+
+  const total = Object.values(byCode).reduce((a, b) => a + (b ?? 0), 0);
+  return { total, byCode };
+}
+
 @Injectable()
 export class ScoringService {
   constructor(private readonly prisma: PrismaService) { }
@@ -365,49 +388,59 @@ export class ScoringService {
     for (let i = 0; i < picks.length; i += batchSize) {
       const batch = picks.slice(i, i + batchSize);
 
-      const tx: any[] = [];
-      for (const p of batch) {
-        const score = matchScoreById.get(p.matchId);
-        if (!score) continue;
+      await this.prisma.$transaction(async (tx) => {
+        for (const p of batch) {
+          const score = matchScoreById.get(p.matchId);
+          if (!score) continue;
 
-        const pickPred = { homePred: p.homePred, awayPred: p.awayPred };
+          const leagueRuleId = p.league?.scoringRuleId || B01;
+          const leagueRule = ruleMapById.get(leagueRuleId) ?? {};
+          const globalRule = ruleMapById.get(B01) ?? {};
 
-        const leagueRuleId = p.league?.scoringRuleId || B01;
+          const match = matchById.get(p.matchId);
 
-        const leagueRule = ruleMapById.get(leagueRuleId) ?? {};
-        const globalRule = ruleMapById.get(B01) ?? {};
+          const bdLeague = computeBreakdown(leagueRule, match, p, score);
+          const bdGlobal = computeBreakdown(globalRule, match, p, score);
 
-        let ptsLeague = computePoints(leagueRule, pickPred, score);
-        let ptsGlobal = computePoints(globalRule, pickPred, score);
+          const detailRowsLeague = Object.entries(bdLeague.byCode)
+            .filter(([, pts]) => (pts ?? 0) > 0)
+            .map(([code, pts]) => ({ code, points: pts }));
 
-        const match = matchById.get(p.matchId);
-        if (match) {
-          ptsLeague += computeKoGanadorFinal(leagueRule, match, p, score);
-          ptsGlobal += computeKoGanadorFinal(globalRule, match, p, score);
-        }
+          const detailRowsGlobal = Object.entries(bdGlobal.byCode)
+            .filter(([, pts]) => (pts ?? 0) > 0)
+            .map(([code, pts]) => ({ code, points: pts }));
 
-        // upsert league-rule score
-        tx.push(
-          this.prisma.pickScore.upsert({
+          // upsert league-rule score
+          const psLeague = await tx.pickScore.upsert({
             where: { pickId_ruleId: { pickId: p.id, ruleId: leagueRuleId } },
-            create: { pickId: p.id, ruleId: leagueRuleId, points: ptsLeague },
-            update: { points: ptsLeague },
-          }),
-        );
+            create: { pickId: p.id, ruleId: leagueRuleId, points: bdLeague.total },
+            update: { points: bdLeague.total },
+          });
 
-        // upsert B01 score
-        tx.push(
-          this.prisma.pickScore.upsert({
+          await tx.pickScoreDetail.deleteMany({ where: { pickScoreId: psLeague.id } });
+          if (detailRowsLeague.length) {
+            await tx.pickScoreDetail.createMany({
+              data: detailRowsLeague.map((d) => ({ pickScoreId: psLeague.id, code: d.code, points: d.points })),
+            });
+          }
+
+          // upsert B01 score
+          const psGlobal = await tx.pickScore.upsert({
             where: { pickId_ruleId: { pickId: p.id, ruleId: B01 } },
-            create: { pickId: p.id, ruleId: B01, points: ptsGlobal },
-            update: { points: ptsGlobal },
-          }),
-        );
+            create: { pickId: p.id, ruleId: B01, points: bdGlobal.total },
+            update: { points: bdGlobal.total },
+          });
 
-        processed++;
-      }
+          await tx.pickScoreDetail.deleteMany({ where: { pickScoreId: psGlobal.id } });
+          if (detailRowsGlobal.length) {
+            await tx.pickScoreDetail.createMany({
+              data: detailRowsGlobal.map((d) => ({ pickScoreId: psGlobal.id, code: d.code, points: d.points })),
+            });
+          }
 
-      if (tx.length) await this.prisma.$transaction(tx);
+          processed++;
+        }
+      });
     }
 
     return {

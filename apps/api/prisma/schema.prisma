@@ -337,6 +337,7 @@ model PickScore {
   id     String @id @default(cuid())
   pickId String
   ruleId String
+  details PickScoreDetail[]
 
   pick Pick        @relation(fields: [pickId], references: [id], onDelete: Cascade)
   rule ScoringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
@@ -344,6 +345,19 @@ model PickScore {
   points Int
 
   @@unique([pickId, ruleId])
+}
+
+model PickScoreDetail {
+  id          String   @id @default(cuid())
+  pickScoreId String
+  code        String   // "EXACTO", "RESULTADO", "BONUS_DIF", "GOLES_LOCAL", "GOLES_VISITA", "KO_GANADOR_FINAL", etc.
+  points      Int
+
+  pickScore   PickScore @relation(fields: [pickScoreId], references: [id], onDelete: Cascade)
+
+  @@unique([pickScoreId, code])
+  @@index([pickScoreId])
+  @@index([code])
 }
 
 // ===== Admin: Standings por grupo (fase F01) =====

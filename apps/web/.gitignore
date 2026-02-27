@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# DB transfer artifacts (local only)
+db_xfer/
+dump_*.sql
+copy_in_season*.sql
+catalog_data.sql
+qa_counts_*.sql
+season_safe.csv
+season_default_scoringrule_map.csv
+psql

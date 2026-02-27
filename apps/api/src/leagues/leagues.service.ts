@@ -291,6 +291,78 @@ export class LeaguesService {
     return { ok: true, ruleId };
   }
 
+  async myPointsBreakdown(userId: string, leagueId: string) {
+    // miembro activo
+    const m = await this.prisma.leagueMember.findUnique({
+      where: { leagueId_userId: { leagueId, userId } },
+      select: { status: true },
+    });
+    if (!m || m.status !== 'ACTIVE') throw new ForbiddenException('Not a member of this league');
+
+    const league = await this.prisma.league.findUnique({
+      where: { id: leagueId },
+      select: { id: true, name: true, seasonId: true, scoringRuleId: true },
+    });
+    if (!league) throw new NotFoundException('League not found');
+
+    const ruleId = league.scoringRuleId ?? 'B01';
+
+    // labels desde conceptos del evento
+    const concepts = await this.prisma.seasonScoringConcept.findMany({
+      where: { seasonId: league.seasonId },
+      orderBy: { id: 'asc' },
+      select: { code: true, label: true },
+    });
+    const labelByCode = new Map(concepts.map((c) => [c.code, c.label]));
+
+    // breakdown real (solo partidos confirmados)
+    const rows = await this.prisma.$queryRaw<Array<{ code: string; points: number }>>`
+      SELECT d.code AS code, COALESCE(SUM(d.points), 0)::int AS points
+      FROM "PickScoreDetail" d
+      JOIN "PickScore" ps ON ps.id = d."pickScoreId"
+      JOIN "Pick" p ON p.id = ps."pickId"
+      JOIN "Match" m ON m.id = p."matchId"
+      WHERE p."leagueId" = ${leagueId}
+        AND p."userId" = ${userId}
+        AND ps."ruleId" = ${ruleId}
+        AND m."resultConfirmed" = true
+      GROUP BY d.code
+      ORDER BY d.code ASC;
+    `;
+
+    const totalFromDetails = rows.reduce((a, r) => a + (r.points ?? 0), 0);
+
+    // fallback por si aún no corriste recompute (details vacíos)
+    const totalArr = await this.prisma.$queryRaw<Array<{ points: number }>>`
+      SELECT COALESCE(SUM(ps.points), 0)::int AS points
+      FROM "PickScore" ps
+      JOIN "Pick" p ON p.id = ps."pickId"
+      JOIN "Match" m ON m.id = p."matchId"
+      WHERE p."leagueId" = ${leagueId}
+        AND p."userId" = ${userId}
+        AND ps."ruleId" = ${ruleId}
+        AND m."resultConfirmed" = true
+      LIMIT 1;
+    `;
+
+    const totalPoints = totalFromDetails > 0 ? totalFromDetails : (totalArr?.[0]?.points ?? 0);
+
+    return {
+      leagueId: league.id,
+      leagueName: league.name,
+      seasonId: league.seasonId,
+      ruleIdUsed: ruleId,
+      totalPoints,
+      breakdown: rows
+        .filter((r) => (r.points ?? 0) > 0)
+        .map((r) => ({
+          code: r.code,
+          label: labelByCode.get(r.code) ?? r.code,
+          points: r.points,
+        })),
+    };
+  }
+
   async listMembers(userId: string, leagueId: string) {
     // Debe ser miembro activo para poder ver la lista
     const m = await this.prisma.leagueMember.findUnique({

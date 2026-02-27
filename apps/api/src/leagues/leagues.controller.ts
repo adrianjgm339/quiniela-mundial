@@ -86,6 +86,11 @@ export class LeaguesController {
     return this.leagues.updateLeagueCustomRule(req.user.userId, leagueId, body);
   }
 
+  @Get(':leagueId/me/points-breakdown')
+  myPointsBreakdown(@Req() req, @Param('leagueId') leagueId: string) {
+    return this.leagues.myPointsBreakdown(req.user.userId, leagueId);
+  }
+
   @Get(':leagueId/members')
   members(@Req() req, @Param('leagueId') leagueId: string) {
     return this.leagues.listMembers(req.user.userId, leagueId);

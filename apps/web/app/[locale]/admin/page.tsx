@@ -128,14 +128,6 @@ export default function AdminHomePage() {
                                 Catálogo (deportes · competiciones · eventos)
                             </Button>
 
-                            <Button
-                                variant="secondary"
-                                className="justify-start"
-                                onClick={() => router.push(`/${locale}/rankings`)}
-                            >
-                                Ver Rankings
-                            </Button>
-
                             <div className="mt-4 pt-4 border-t border-[var(--border)]">
                                 <div className="text-xs uppercase tracking-wide text-[color:var(--muted)] mb-2">
                                     Admin · Fase de Grupos

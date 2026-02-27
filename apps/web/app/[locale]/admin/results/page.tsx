@@ -803,7 +803,14 @@ export default function AdminResultsPage() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => router.push(`/${locale}/dashboard`)}
+            onClick={() => {
+              // Volver a la pantalla anterior real; si no hay historial, fallback a Admin
+              if (typeof window !== 'undefined' && window.history.length > 1) {
+                router.back();
+              } else {
+                router.push(`/${locale}/admin`);
+              }
+            }}
           >
             Volver
           </Button>

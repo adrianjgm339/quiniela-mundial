@@ -116,6 +116,26 @@ export default function LeaguesPage() {
   const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>('');
   const [selectedSeasonFilterId, setSelectedSeasonFilterId] = useState<string>(''); // evento
 
+  // Precarga PRO: si hay activeSeasonId guardado, precargar filtros Sport/Competition/Season
+  useEffect(() => {
+    if (loadingCatalog) return;
+    if (!catalog || catalog.length === 0) return;
+
+    // prioridad: state -> localStorage
+    const seasonToApply = activeSeasonId || localStorage.getItem('activeSeasonId') || '';
+    if (!seasonToApply) return;
+
+    // si ya hay algo seleccionado, no pisar
+    if (selectedSeasonFilterId || selectedSportId || selectedCompetitionId) return;
+
+    const inferred = inferSportCompetitionFromSeason(seasonToApply);
+    if (inferred.sportId) setSelectedSportId(inferred.sportId);
+    if (inferred.competitionId) setSelectedCompetitionId(inferred.competitionId);
+
+    setSelectedSeasonFilterId(seasonToApply);
+    setActiveSeasonNameLabel('Seleccionado'); // opcional: si luego tienes el label real, se puede mejorar
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingCatalog, catalog, activeSeasonId]);
 
   const [leagues, setLeagues] = useState<ApiLeague[]>([]);
   const [loadingLeagues, setLoadingLeagues] = useState(true);
@@ -312,7 +332,7 @@ export default function LeaguesPage() {
     return leagues.filter((l: any) => l?.seasonId === selectedSeasonFilterId);
   }, [leagues, selectedSeasonFilterId]);
 
-    const aiContext = useMemo(() => {
+  const aiContext = useMemo(() => {
     return {
       page: 'leagues',
       locale,
@@ -331,14 +351,14 @@ export default function LeaguesPage() {
 
       selectedLeague: selectedLeague
         ? {
-            id: selectedLeague.id,
-            name: selectedLeague.name,
-            joinCode: selectedLeague.joinCode,
-            joinPolicy: (selectedLeague as any).joinPolicy ?? null,
-            scoringRuleId: (selectedLeague as any).scoringRuleId ?? null,
-            seasonId: (selectedLeague as any).seasonId ?? null,
-            myRole: (selectedLeague as any).myRole ?? myLeagueRole ?? null,
-          }
+          id: selectedLeague.id,
+          name: selectedLeague.name,
+          joinCode: selectedLeague.joinCode,
+          joinPolicy: (selectedLeague as any).joinPolicy ?? null,
+          scoringRuleId: (selectedLeague as any).scoringRuleId ?? null,
+          seasonId: (selectedLeague as any).seasonId ?? null,
+          myRole: (selectedLeague as any).myRole ?? myLeagueRole ?? null,
+        }
         : null,
 
       // estado creación/entrada (útil para el bot)
@@ -1260,7 +1280,7 @@ export default function LeaguesPage() {
             </div>
           )}
         </Card>
-                {/* Chatbot IA */}
+        {/* Chatbot IA */}
         <AiChatWidget locale={locale} token={token} context={aiContext} />
       </div>
     </div>

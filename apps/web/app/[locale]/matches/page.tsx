@@ -119,6 +119,19 @@ export default function MatchesPage() {
     return c?.seasons ?? [];
   }, [competitionOptions, competitionId]);
 
+  function inferSportCompetitionFromSeason(seasonId: string, cat: CatalogSport[]) {
+    if (!seasonId) return { sportId: "", competitionId: "" };
+
+    for (const s of cat ?? []) {
+      for (const c of s.competitions ?? []) {
+        const found = (c.seasons ?? []).some((se) => se.id === seasonId);
+        if (found) return { sportId: s.id, competitionId: c.id };
+      }
+    }
+
+    return { sportId: "", competitionId: "" };
+  }
+
   // modal state
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<ApiMatch | null>(null);
@@ -248,13 +261,23 @@ export default function MatchesPage() {
           appliedLeaguesContextRef.current = true;
         } else if (!appliedLeaguesContextRef.current) {
           // ENTRADA LIMPIA (si NO vengo de /leagues)
-          setSportId("");
-          setCompetitionId("");
-          setSeasonId("");
+          const activeSeasonId = localStorage.getItem("activeSeasonId") || "";
 
-          localStorage.removeItem("activeSeasonId");
+          if (activeSeasonId) {
+            // Restaurar evento y deducir cascada
+            const inferred = inferSportCompetitionFromSeason(activeSeasonId, cat);
+            setSportId(inferred.sportId);
+            setCompetitionId(inferred.competitionId);
+            setSeasonId(activeSeasonId);
+          } else {
+            // No hay evento guardado → todo vacío
+            setSportId("");
+            setCompetitionId("");
+            setSeasonId("");
+          }
+
+          // Liga/picks siempre limpios en entrada directa (evita picks sin confirmar liga)
           localStorage.removeItem("activeLeagueId");
-
           setLeagueId(null);
           setLeagueConfirmed(false);
         }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   getLeagueLeaderboard,
   getWorldLeaderboard,
@@ -97,6 +97,31 @@ function RowTable({
 export default function RankingsPage() {
   const router = useRouter();
   const { locale } = useParams<{ locale: string }>();
+  const searchParams = useSearchParams();
+
+  const qsScope = (searchParams.get('scope') || '').toLowerCase(); // 'league' | 'world' | 'country'
+  const qsLeagueId = searchParams.get('leagueId') || '';
+  const qsSeasonId = searchParams.get('seasonId') || '';
+
+  function isSameQuery(next: { scope?: string; leagueId?: string; seasonId?: string }) {
+    const scope = (next.scope || '').toLowerCase();
+    const leagueId = next.leagueId || '';
+    const seasonId = next.seasonId || '';
+
+    return (qsScope || '') === scope && (qsLeagueId || '') === leagueId && (qsSeasonId || '') === seasonId;
+  }
+
+  function pushRankingsQuery(next: { scope?: string; leagueId?: string; seasonId?: string }) {
+    if (isSameQuery(next)) return;
+
+    const params = new URLSearchParams();
+    if (next.scope) params.set('scope', next.scope);
+    if (next.leagueId) params.set('leagueId', next.leagueId);
+    if (next.seasonId) params.set('seasonId', next.seasonId);
+
+    const qs = params.toString();
+    router.replace(`/${locale}/rankings${qs ? `?${qs}` : ''}`);
+  }
 
   const [tab, setTab] = useState<Tab>('LEAGUE');
   const [countryCode, setCountryCode] = useState<string>('');
@@ -175,13 +200,20 @@ export default function RankingsPage() {
         const myLeagues = await getMyLeagues(token);
         setLeagues(myLeagues);
 
-        // 3) Default Season: prioridad a activeSeasonId (igual que otras pantallas)
+        // 3) Default Tab/Scope desde querystring (Dashboard → Rankings)
+        if (qsScope === 'world') setTab('WORLD');
+        if (qsScope === 'league') setTab('LEAGUE');
+        if (qsScope === 'country') setTab('COUNTRY');
+
+        // 4) Default Season: prioridad a seasonId del querystring, luego activeSeasonId
         const storedSeasonId = localStorage.getItem('activeSeasonId') || '';
-        let nextSeasonId = storedSeasonId;
+        let nextSeasonId = qsSeasonId || storedSeasonId;
 
         // Si no hay activeSeasonId pero hay activeLeagueId, inferimos season desde la liga
         const storedActiveLeagueId = localStorage.getItem('activeLeagueId') || '';
-        const activeLeague = storedActiveLeagueId ? myLeagues.find((l) => l.id === storedActiveLeagueId) : null;
+        const preferredLeagueId = qsLeagueId || storedActiveLeagueId;
+
+        const activeLeague = preferredLeagueId ? myLeagues.find((l) => l.id === preferredLeagueId) : null;
         if (!nextSeasonId && activeLeague?.seasonId) nextSeasonId = activeLeague.seasonId;
 
         // Si hay season, inferir sport/competition
@@ -208,26 +240,29 @@ export default function RankingsPage() {
           setSeasonId('');
         }
 
-        // 4) Default League: solo si pertenece al evento seleccionado
+        // 5) Default League: prioridad a leagueId del querystring, luego activeLeagueId (solo si pertenece al evento)
         let defaultLeagueId = '';
-        if (nextSeasonId && storedActiveLeagueId) {
-          const ok = myLeagues.some((l) => l.id === storedActiveLeagueId && (l as any)?.seasonId === nextSeasonId);
-          if (ok) defaultLeagueId = storedActiveLeagueId;
+        if (nextSeasonId && preferredLeagueId) {
+          const ok = myLeagues.some((l) => l.id === preferredLeagueId && (l as any)?.seasonId === nextSeasonId);
+          if (ok) defaultLeagueId = preferredLeagueId;
         }
 
         // si no hay activeLeagueId válido, NO autoseleccionamos (dejamos "Selecciona liga…")
         setSelectedLeagueId(defaultLeagueId);
 
+        // Sync localStorage para coherencia global si vino desde Dashboard
+        if (defaultLeagueId) localStorage.setItem('activeLeagueId', defaultLeagueId);
+
         // Si activeLeagueId no pertenece al evento, lo limpiamos para evitar incoherencia
-        if (storedActiveLeagueId && nextSeasonId) {
-          const ok = myLeagues.some((l) => l.id === storedActiveLeagueId && (l as any)?.seasonId === nextSeasonId);
+        if (preferredLeagueId && nextSeasonId) {
+          const ok = myLeagues.some((l) => l.id === preferredLeagueId && (l as any)?.seasonId === nextSeasonId);
           if (!ok) localStorage.removeItem('activeLeagueId');
         }
       } catch (e) {
         console.error('Error loading rankings prerequisites', e);
       }
     })();
-  }, [locale, router]);
+  }, [locale, router, qsScope, qsLeagueId, qsSeasonId]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -241,6 +276,14 @@ export default function RankingsPage() {
 
     (async () => {
       try {
+        // URL shareable: reflejar selección actual
+        if (tab === 'LEAGUE') {
+          pushRankingsQuery({ scope: 'league', leagueId: selectedLeagueId || '' });
+        } else if (tab === 'WORLD') {
+          pushRankingsQuery({ scope: 'world', seasonId: seasonId || '' });
+        } else {
+          pushRankingsQuery({ scope: 'country', seasonId: seasonId || '' });
+        }
         if (tab === 'LEAGUE') {
           // ✅ NO redirigir. Si no hay liga seleccionada, solo muestra mensaje.
           if (!selectedLeagueId) {

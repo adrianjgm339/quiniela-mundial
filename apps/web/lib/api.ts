@@ -307,6 +307,15 @@ export type LeaderboardRow = {
   rank: number;
 };
 
+export type ApiPointsBreakdown = {
+  leagueId: string;
+  leagueName: string;
+  seasonId: string;
+  ruleIdUsed: string;
+  totalPoints: number;
+  breakdown: Array<{ code: string; label: string; points: number }>;
+};
+
 export type LeagueLeaderboardResponse = {
   scope: 'LEAGUE';
   league: { id: string; name: string; joinCode: string };
@@ -624,4 +633,18 @@ export async function adminDeleteSeason(token: string, id: string) {
   });
 
   return apiJson(res, "Error borrando evento");
+}
+
+export async function getMyPointsBreakdown(token: string, leagueId: string) {
+  const res = await fetch(`${API_BASE}/leagues/${encodeURIComponent(leagueId)}/me/points-breakdown`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(txt || `Failed to load points breakdown (${res.status})`);
+  }
+
+  return (await res.json()) as ApiPointsBreakdown;
 }

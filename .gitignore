@@ -65,3 +65,9 @@ dist/
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# local db dumps / transfer artifacts
+*.sql
+db_xfer/
+psql
+*.csv
