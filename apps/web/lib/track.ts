@@ -1,13 +1,25 @@
-type TrackProps = Record<string, any>;
+type TrackProps = Record<string, unknown>;
 
-export function track(event: string, props: Record<string, any> = {}) {
+type PosthogCapture = (event: string, properties?: Record<string, unknown>) => void;
+
+// Type guard: verifica si un valor es un objeto con .capture
+function hasCapture(v: unknown): v is { capture: PosthogCapture } {
+  return typeof v === "object" && v !== null && "capture" in v && typeof (v as { capture?: unknown }).capture === "function";
+}
+
+export function track(event: string, props: TrackProps = {}) {
   try {
-    if (typeof window !== 'undefined' && (window as any).posthog?.capture) {
-      (window as any).posthog.capture(event, props);
+    if (typeof window !== "undefined") {
+      const ph: unknown = (window as unknown as { posthog?: unknown }).posthog;
+      if (hasCapture(ph)) {
+        ph.capture(event, props);
+      }
     }
-  } catch {}
+  } catch {
+    // swallow
+  }
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== "production") {
     console.log(`[track] ${event}`, props);
   }
 }
