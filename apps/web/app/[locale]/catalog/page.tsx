@@ -43,7 +43,10 @@ export default function CatalogPage() {
         setSportId(nextSportId);
         setCompetitionId(nextCompetitionId);
       })
-      .catch((e: any) => setLoadError(e?.message ?? "Error"));
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Error";
+        setLoadError(msg);
+      });
   }, [locale]);
 
   const sport = useMemo(() => data?.find((s) => s.id === sportId), [data, sportId]);
@@ -82,10 +85,14 @@ export default function CatalogPage() {
 
     // Señal explícita de cambio de contexto (útil para /dashboard y para bust de cache)
     localStorage.setItem("activeSeasonSlug", se.slug ?? "");
-    localStorage.setItem("activeContextUpdatedAt", String(Date.now()));
+
+    // Bump determinístico para bust de cache sin usar Date.now() (regla react-hooks/purity)
+    const prev = Number(localStorage.getItem("activeContextUpdatedAt") ?? "0");
+    const cv = String(prev + 1);
+    localStorage.setItem("activeContextUpdatedAt", cv);
 
     // Forzar navegación “real” (y re-render) pasando seasonId por query param
-    router.push(`/${locale}/dashboard?seasonId=${encodeURIComponent(se.id)}&cv=${Date.now()}`);
+    router.push(`/${locale}/dashboard?seasonId=${encodeURIComponent(se.id)}&cv=${cv}`);
   }
 
   return (
@@ -118,24 +125,26 @@ export default function CatalogPage() {
           <div className="mt-8 grid gap-6 md:grid-cols-3">
             {/* Deportes */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
-              <h2 className="text-sm font-semibold text-[var(--muted-foreground)]">Deporte</h2>
+              <h2 className="text-lg font-semibold">Deporte</h2>
+
               <div className="mt-4 grid gap-2">
                 {data.map((s) => (
                   <button
                     key={s.id}
+                    type="button"
                     onClick={() => {
                       setSportId(s.id);
-                      setCompetitionId(s.competitions[0]?.id ?? "");
+                      setCompetitionId(s.competitions?.[0]?.id ?? "");
                     }}
                     className={[
-                      "w-full rounded-xl border px-4 py-3 text-left transition",
+                      "w-full rounded-xl border px-4 py-3 text-left text-sm transition",
                       s.id === sportId
-                        ? "border-[var(--accent)] bg-[var(--muted)] ring-1 ring-[var(--accent)]"
+                        ? "border-[var(--primary)] bg-[var(--primary)]/10"
                         : "border-[var(--border)] hover:bg-[var(--muted)]",
                     ].join(" ")}
                   >
                     <div className="font-medium">{s.name}</div>
-                    <div className="text-xs text-[var(--muted-foreground)]">{s.competitions.length} competición(es)</div>
+                    <div className="text-xs text-[var(--muted-foreground)]">{s.slug}</div>
                   </button>
                 ))}
               </div>
@@ -143,60 +152,59 @@ export default function CatalogPage() {
 
             {/* Competiciones */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
-              <h2 className="text-sm font-semibold text-white/80">Competición</h2>
+              <h2 className="text-lg font-semibold">Competición</h2>
+
               <div className="mt-4 grid gap-2">
+                {competitions.length === 0 && (
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-4 text-sm text-[var(--muted-foreground)]">
+                    No hay competiciones disponibles.
+                  </div>
+                )}
+
                 {competitions.map((c) => (
                   <button
                     key={c.id}
+                    type="button"
                     onClick={() => setCompetitionId(c.id)}
                     className={[
-                      "w-full rounded-xl border px-4 py-3 text-left transition",
+                      "w-full rounded-xl border px-4 py-3 text-left text-sm transition",
                       c.id === competitionId
-                        ? "border-[var(--accent)] bg-[var(--muted)] ring-1 ring-[var(--accent)]"
+                        ? "border-[var(--primary)] bg-[var(--primary)]/10"
                         : "border-[var(--border)] hover:bg-[var(--muted)]",
                     ].join(" ")}
                   >
                     <div className="font-medium">{c.name}</div>
-                    <div className="text-xs text-[var(--muted-foreground)]">{c.seasons.length} evento(s)</div>
+                    <div className="text-xs text-[var(--muted-foreground)]">{c.slug}</div>
                   </button>
                 ))}
-
-                {!competitions.length && (
-                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
-                    No hay competiciones aún.
-                  </div>
-                )}
               </div>
             </section>
 
-            {/* Eventos (Seasons) */}
+            {/* Eventos */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
-              <h2 className="text-sm font-semibold text-white/80">Evento</h2>
+              <h2 className="text-lg font-semibold">Evento</h2>
+
               <div className="mt-4 grid gap-2">
+                {seasons.length === 0 && (
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-4 text-sm text-[var(--muted-foreground)]">
+                    No hay eventos disponibles.
+                  </div>
+                )}
+
                 {seasons.map((se) => (
                   <button
                     key={se.id}
                     onClick={() => selectSeason(se)}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-left hover:bg-[var(--muted)]"
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-left text-sm transition hover:bg-[var(--muted)]"
                   >
                     <div className="font-medium">{se.name}</div>
                     <div className="text-xs text-[var(--muted-foreground)]">{se.slug}</div>
                   </button>
                 ))}
-
-                {!seasons.length && (
-                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
-                    No hay eventos aún.
-                  </div>
-                )}
               </div>
             </section>
           </div>
         )}
-
-        <p className="mt-8 text-sm text-[var(--muted-foreground)]">
-          <span className="text-[var(--foreground)]/80">/catalog?locale={locale}</span>
-        </p>
       </div>
     </main>
   );
