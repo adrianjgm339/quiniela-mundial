@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   getCatalog,
   getMatches,
@@ -14,47 +14,124 @@ import {
   type ApiLeague,
   type CatalogSport,
 } from '@/lib/api';
-import { useSearchParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { PageHeader } from "@/components/ui/page-header";
-import { Badge } from "@/components/ui/badge";
-import { TeamWithFlag } from "@/components/team-with-flag";
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { PageHeader } from '@/components/ui/page-header';
+import { TeamWithFlag } from '@/components/team-with-flag';
 import AiChatWidget from '../../components/AiChatWidget';
+
+type MatchExtras = {
+  phaseCode?: string | null;
+  groupCode?: string | null;
+
+  utcDateTime?: string | null;
+  timeUtc?: string | null;
+  kickoffUtc?: string | null;
+
+  closeUtc?: string | null;
+  closeMinutes?: number | null;
+};
+
+type TeamExtras = {
+  flagKey?: string | null;
+  isPlaceholder?: boolean | null;
+};
+
+type MatchWithExtras = ApiMatch &
+  MatchExtras & {
+    homeTeam?: (ApiMatch['homeTeam'] & TeamExtras) | null;
+    awayTeam?: (ApiMatch['awayTeam'] & TeamExtras) | null;
+  };
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getErrorMessage(raw: unknown): string {
+  if (raw instanceof Error) return raw.message;
+  if (isRecord(raw) && typeof raw.message === 'string') return raw.message;
+  return String(raw ?? '');
+}
+
+function parseTs(iso?: string | null) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}
+
+function getCloseTs(m: MatchWithExtras) {
+  // Preferimos closeUtc
+  const close = parseTs(m.closeUtc);
+  if (close) return close;
+
+  // Fallback: utcDateTime/timeUtc/kickoffUtc - closeMinutes
+  const start = parseTs(m.utcDateTime ?? m.timeUtc ?? m.kickoffUtc);
+  const mins = typeof m.closeMinutes === 'number' ? m.closeMinutes : null;
+  if (start && mins != null) return start - mins * 60_000;
+
+  return null;
+}
+
+function formatLocalDateTime(locale: string, utcIso?: string | null) {
+  const ts = parseTs(utcIso);
+  if (!ts) return '';
+  const d = new Date(ts);
+
+  const date = new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+  }).format(d);
+
+  const time = new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d);
+
+  return `${date} · ${time}`;
+}
+
+function formatCountdown(ms: number) {
+  const totalMin = Math.floor(ms / 60_000);
+  if (totalMin <= 0) return '0m';
+
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+
+  if (h <= 0) return `${m}m`;
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
 
 export default function MatchesPage() {
   const router = useRouter();
   const appliedLeaguesContextRef = useRef(false);
   const { locale } = useParams<{ locale: string }>();
   const [now, setNow] = useState(() => Date.now());
+
   const searchParams = useSearchParams();
-  const phase = searchParams.get("phase") || "";
-  const group = searchParams.get("group") || "";
+  const phase = searchParams.get('phase') || '';
+  const group = searchParams.get('group') || '';
 
+  // Restaurar phase/group desde localStorage en entrada “limpia”
   useEffect(() => {
-    // Si ya viene phase en URL, no tocamos nada
-    const hasPhaseInUrl = searchParams.has("phase");
-    const hasGroupInUrl = searchParams.has("group");
-
+    const hasPhaseInUrl = searchParams.has('phase');
+    const hasGroupInUrl = searchParams.has('group');
     if (hasPhaseInUrl || hasGroupInUrl) return;
 
-    const savedPhase = localStorage.getItem("matchesPhase") || "";
-    const savedGroup = localStorage.getItem("matchesGroup") || "";
-
+    const savedPhase = localStorage.getItem('matchesPhase') || '';
+    const savedGroup = localStorage.getItem('matchesGroup') || '';
     if (!savedPhase && !savedGroup) return;
 
     const params = new URLSearchParams(searchParams.toString());
-    if (savedPhase) params.set("phase", savedPhase);
-    if (savedGroup) params.set("group", savedGroup);
+    if (savedPhase) params.set('phase', savedPhase);
+    if (savedGroup) params.set('group', savedGroup);
 
     const qs = params.toString();
-    router.replace(`/${locale}/matches${qs ? `?${qs}` : ""}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
-
+    router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
+  }, [locale, router, searchParams]);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000); // refresca cada 30s
+    const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
 
@@ -73,41 +150,11 @@ export default function MatchesPage() {
   const [leagues, setLeagues] = useState<ApiLeague[]>([]);
   const [loadingPicks, setLoadingPicks] = useState(false);
 
-  // Opción 2: filtros Sport → Competition → Season (Evento) igual que /leagues
+  // Cascada Sport → Competition → Season (Evento)
   const [catalog, setCatalog] = useState<CatalogSport[]>([]);
-  const [sportId, setSportId] = useState<string>("");
-  const [competitionId, setCompetitionId] = useState<string>("");
-  const [seasonId, setSeasonId] = useState<string>("");
-
-  // Liga "efectiva": solo cuenta si existe y pertenece al evento actual
-  const effectiveLeagueId = useMemo(() => {
-    // 🔒 Candado: si el usuario no ha confirmado liga, no hay liga efectiva.
-    if (!leagueConfirmed) return null;
-
-    if (!leagueId) return null;
-    if (!seasonId) return null;
-
-    const l = leagues.find((x) => x.id === leagueId);
-    if (!l) return null;
-    return l.seasonId === seasonId ? leagueId : null;
-  }, [leagueConfirmed, leagueId, seasonId, leagues]);
-
-  useEffect(() => {
-    // Si NO hay liga efectiva (no existe o no pertenece al evento actual),
-    // entonces NO debe quedar ningún pick “visible” en pantalla.
-    if (!effectiveLeagueId) {
-      setPicksByMatchId({});
-      setPicksLeagueId(null);
-      setLoadingPicks(false);
-    }
-
-  }, [effectiveLeagueId]);
-
-  const visibleLeagues = useMemo(() => {
-    if (!seasonId) return [];
-    return leagues.filter((l) => l.seasonId === seasonId);
-  }, [leagues, seasonId]);
-
+  const [sportId, setSportId] = useState<string>('');
+  const [competitionId, setCompetitionId] = useState<string>('');
+  const [seasonId, setSeasonId] = useState<string>('');
 
   const competitionOptions = useMemo(() => {
     const s = catalog.find((x) => x.id === sportId);
@@ -119,33 +166,20 @@ export default function MatchesPage() {
     return c?.seasons ?? [];
   }, [competitionOptions, competitionId]);
 
-  function inferSportCompetitionFromSeason(seasonId: string, cat: CatalogSport[]) {
-    if (!seasonId) return { sportId: "", competitionId: "" };
+  const inferSportCompetitionFromSeason = useCallback((sid: string, cat: CatalogSport[]) => {
+    if (!sid) return { sportId: '', competitionId: '' };
 
     for (const s of cat ?? []) {
       for (const c of s.competitions ?? []) {
-        const found = (c.seasons ?? []).some((se) => se.id === seasonId);
+        const found = (c.seasons ?? []).some((se) => se.id === sid);
         if (found) return { sportId: s.id, competitionId: c.id };
       }
     }
+    return { sportId: '', competitionId: '' };
+  }, []);
 
-    return { sportId: "", competitionId: "" };
-  }
-
-  // modal state
-  const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<ApiMatch | null>(null);
-  const [homePred, setHomePred] = useState<string>('');
-  const [koWinnerTeamId, setKoWinnerTeamId] = useState<string>(""); // '' | teamId
-  const [awayPred, setAwayPred] = useState<string>('');
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  function isLocked(m: ApiMatch) {
-    // Si el backend marca confirmado, bloqueamos
+  function isLocked(m: MatchWithExtras) {
     if (m.resultConfirmed) return true;
-
-    // Si tenemos closeUtc, bloqueamos cuando ya pasó
     if (!m.closeUtc) return false;
 
     const closeMs = new Date(m.closeUtc).getTime();
@@ -154,56 +188,42 @@ export default function MatchesPage() {
     return Date.now() > closeMs;
   }
 
-  function parseTs(iso?: string | null) {
-    if (!iso) return null;
-    const t = Date.parse(iso);
-    return Number.isFinite(t) ? t : null;
-  }
+  // Liga “efectiva”: solo cuenta si existe y pertenece al evento actual
+  const effectiveLeagueId = useMemo(() => {
+    if (!leagueConfirmed) return null;
+    if (!leagueId) return null;
+    if (!seasonId) return null;
 
-  function getCloseTs(m: any) {
-    // Preferimos closeUtc
-    const close = parseTs(m.closeUtc);
-    if (close) return close;
+    const l = leagues.find((x) => x.id === leagueId);
+    if (!l) return null;
 
-    // Fallback: utcDateTime/timeUtc - closeMinutes (si lo tienes en el DTO)
-    const start = parseTs(m.utcDateTime ?? m.timeUtc ?? m.kickoffUtc);
-    const mins = typeof m.closeMinutes === "number" ? m.closeMinutes : null;
-    if (start && mins != null) return start - mins * 60_000;
+    // Nota: ApiLeague en tu backend trae seasonId, si por types no lo trae, TS igual deja compilar por estructura.
+    return (l as unknown as { seasonId?: string | null }).seasonId === seasonId ? leagueId : null;
+  }, [leagueConfirmed, leagueId, seasonId, leagues]);
 
-    return null;
-  }
+  useEffect(() => {
+    if (!effectiveLeagueId) {
+      setPicksByMatchId({});
+      setPicksLeagueId(null);
+      setLoadingPicks(false);
+    }
+  }, [effectiveLeagueId]);
 
-  function formatLocalDateTime(locale: string, utcIso?: string | null) {
-    const ts = parseTs(utcIso);
-    if (!ts) return "";
-    const d = new Date(ts);
+  const visibleLeagues = useMemo(() => {
+    if (!seasonId) return [];
+    return leagues.filter((l) => (l as unknown as { seasonId?: string | null }).seasonId === seasonId);
+  }, [leagues, seasonId]);
 
-    // Sin timeZone => usa la zona horaria local del navegador del usuario
-    const date = new Intl.DateTimeFormat(locale, {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-    }).format(d);
+  // modal state
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<ApiMatch | null>(null);
+  const [homePred, setHomePred] = useState<string>('');
+  const [koWinnerTeamId, setKoWinnerTeamId] = useState<string>(''); // '' | teamId
+  const [awayPred, setAwayPred] = useState<string>('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-    const time = new Intl.DateTimeFormat(locale, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(d);
-
-    return `${date} · ${time}`;
-  }
-
-  function formatCountdown(ms: number) {
-    const totalMin = Math.floor(ms / 60_000);
-    if (totalMin <= 0) return "0m";
-
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-
-    if (h <= 0) return `${m}m`;
-    return `${h}h ${String(m).padStart(2, "0")}m`;
-  }
-
+  // Carga inicial: token + catálogo + ligas + handoff context
   useEffect(() => {
     const t = localStorage.getItem('token');
     if (!t) {
@@ -213,7 +233,7 @@ export default function MatchesPage() {
 
     setToken(t);
 
-    (async () => {
+    void (async () => {
       try {
         setLoading(true);
         setError(null);
@@ -227,107 +247,92 @@ export default function MatchesPage() {
         setLeagues(myLeagues);
 
         // 3) Handoff /leagues -> /matches (si existe)
-        const fromLeagues = localStorage.getItem("matches_ctx_fromLeagues") === "1";
+        const fromLeagues = localStorage.getItem('matches_ctx_fromLeagues') === '1';
 
         if (fromLeagues && !appliedLeaguesContextRef.current) {
-          const sId = localStorage.getItem("matches_ctx_sportId") || "";
-          const cId = localStorage.getItem("matches_ctx_competitionId") || "";
-          const season = localStorage.getItem("matches_ctx_seasonId") || "";
-          const lId = localStorage.getItem("matches_ctx_leagueId") || "";
+          const sId = localStorage.getItem('matches_ctx_sportId') || '';
+          const cId = localStorage.getItem('matches_ctx_competitionId') || '';
+          const season = localStorage.getItem('matches_ctx_seasonId') || '';
+          const lId = localStorage.getItem('matches_ctx_leagueId') || '';
 
           setSportId(sId);
           setCompetitionId(cId);
           setSeasonId(season);
 
-          // Validar liga contra mis ligas y el evento
-          const leagueOk = myLeagues.some((l) => l.id === lId && l.seasonId === season);
+          const leagueOk = myLeagues.some(
+            (l) => l.id === lId && (l as unknown as { seasonId?: string | null }).seasonId === season,
+          );
 
           if (leagueOk) {
             setLeagueId(lId);
             setLeagueConfirmed(true);
-            localStorage.setItem("activeLeagueId", lId);
+            localStorage.setItem('activeLeagueId', lId);
           } else {
             setLeagueId(null);
             setLeagueConfirmed(false);
-            localStorage.removeItem("activeLeagueId");
+            localStorage.removeItem('activeLeagueId');
           }
 
-          // Persistir season activo para consistencia
-          if (season) localStorage.setItem("activeSeasonId", season);
+          if (season) localStorage.setItem('activeSeasonId', season);
 
-          // Limpiar flag para que NO sea limitativo
-          localStorage.removeItem("matches_ctx_fromLeagues");
-
+          localStorage.removeItem('matches_ctx_fromLeagues');
           appliedLeaguesContextRef.current = true;
         } else if (!appliedLeaguesContextRef.current) {
-          // ENTRADA LIMPIA (si NO vengo de /leagues)
-          const activeSeasonId = localStorage.getItem("activeSeasonId") || "";
+          // Entrada limpia (NO vengo de /leagues)
+          const activeSeasonId = localStorage.getItem('activeSeasonId') || '';
 
           if (activeSeasonId) {
-            // Restaurar evento y deducir cascada
             const inferred = inferSportCompetitionFromSeason(activeSeasonId, cat);
             setSportId(inferred.sportId);
             setCompetitionId(inferred.competitionId);
             setSeasonId(activeSeasonId);
           } else {
-            // No hay evento guardado → todo vacío
-            setSportId("");
-            setCompetitionId("");
-            setSeasonId("");
+            setSportId('');
+            setCompetitionId('');
+            setSeasonId('');
           }
 
-          // Liga/picks siempre limpios en entrada directa (evita picks sin confirmar liga)
-          localStorage.removeItem("activeLeagueId");
+          localStorage.removeItem('activeLeagueId');
           setLeagueId(null);
           setLeagueConfirmed(false);
         }
 
-        // 6) IMPORTANTÍSIMO: en el load inicial NO pedimos partidos.
-        //    Los partidos se cargan únicamente cuando hay seasonId (ver useEffect([seasonId])).
+        // Importante: no pedimos partidos aquí; los pedimos cuando haya seasonId.
         setAllItems([]);
         setItems([]);
         setPicksByMatchId({});
         setLoadingPicks(false);
-
-      } catch (e: any) {
-        setError(e?.message ?? 'Error cargando partidos');
+      } catch (e: unknown) {
+        setError(getErrorMessage(e) || 'Error cargando pantalla');
       } finally {
         setLoading(false);
       }
     })();
-  }, [locale, router]);
+  }, [inferSportCompetitionFromSeason, locale, router]);
 
+  // Cargar partidos cuando cambia seasonId
   useEffect(() => {
     if (!token) return;
 
     if (!seasonId) {
-      // Estamos en transición (ej: cambiando deporte/competición).
-      // No recargues ni resetees nada que pueda sobrescribir sportId.
+      // en transición (cambiando deporte/competición)
       return;
     }
 
-    (async () => {
-
+    void (async () => {
       try {
         setLoading(true);
         setError(null);
 
-        // Al cambiar evento, limpiamos phase/group (evita “filtros raros”)
-        localStorage.setItem("matchesPhase", "");
-        localStorage.setItem("matchesGroup", "");
-
-        // reset URL sin query
+        // Al cambiar evento, limpiamos phase/group
+        localStorage.setItem('matchesPhase', '');
+        localStorage.setItem('matchesGroup', '');
         router.replace(`/${locale}/matches`);
 
-        // Season activo en backend
-        if (seasonId) {
-          await setActiveSeason(token, seasonId);
-        }
+        await setActiveSeason(token, seasonId);
 
-        // Elegir liga válida dentro del season
-        const leaguesInSeason = seasonId ? leagues.filter((l) => l.seasonId === seasonId) : [];
+        const leaguesInSeason = leagues.filter((l) => (l as unknown as { seasonId?: string | null }).seasonId === seasonId);
 
-        // Si venimos de /leagues con una liga ya confirmada y válida, NO la pisamos
         const keepRestoredLeague =
           appliedLeaguesContextRef.current &&
           leagueConfirmed &&
@@ -339,29 +344,24 @@ export default function MatchesPage() {
         if (keepRestoredLeague) {
           nextLeagueId = leagueId;
         } else {
-          // UX: si hay más de 1 liga, obligar a escoger SIEMPRE
           if (leaguesInSeason.length === 1) {
             nextLeagueId = leaguesInSeason[0].id;
           } else {
             nextLeagueId = null;
-            localStorage.removeItem("activeLeagueId");
+            localStorage.removeItem('activeLeagueId');
           }
 
           setLeagueId(nextLeagueId);
           setLeagueConfirmed(!!nextLeagueId);
         }
 
-        if (nextLeagueId) {
-          localStorage.setItem("activeLeagueId", nextLeagueId);
-        } else if (!keepRestoredLeague) {
-          localStorage.removeItem("activeLeagueId");
-        }
+        if (nextLeagueId) localStorage.setItem('activeLeagueId', nextLeagueId);
+        else if (!keepRestoredLeague) localStorage.removeItem('activeLeagueId');
 
         // Limpiar picks visibles mientras cambia liga/evento
         setPicksByMatchId({});
         setPicksLeagueId(null);
 
-        // Partidos del season
         const all = await getMatches(token, locale, { seasonId: seasonId || undefined });
         setAllItems(all);
 
@@ -371,21 +371,18 @@ export default function MatchesPage() {
           groupCode: undefined,
         });
         setItems(data);
-
-      } catch (e: any) {
-        setError(e?.message ?? "Error cargando partidos");
+      } catch (e: unknown) {
+        setError(getErrorMessage(e) || 'Error cargando partidos');
       } finally {
         setLoading(false);
       }
     })();
+  }, [token, seasonId, locale, router, leagues, leagueConfirmed, leagueId]);
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seasonId]);
-
+  // Cargar picks cuando cambia la liga efectiva
   useEffect(() => {
     if (!token) return;
 
-    // Si no hay liga efectiva, no hay picks que cargar
     if (!effectiveLeagueId) {
       setPicksByMatchId({});
       setLoadingPicks(false);
@@ -395,31 +392,26 @@ export default function MatchesPage() {
     let cancelled = false;
     const requestedLeagueId = effectiveLeagueId;
 
-    (async () => {
+    void (async () => {
       try {
         setLoadingPicks(true);
-
-        // Limpia picks visibles inmediatamente al cambiar de liga
         setPicksByMatchId({});
         setPicksLeagueId(null);
 
         const picks = await listPicks(token, requestedLeagueId);
         if (cancelled) return;
 
-        // SAFETY: aunque el back devuelva picks de otras ligas,
-        // aquí solo tomamos los del leagueId solicitado.
         const onlyThisLeague = (Array.isArray(picks) ? picks : []).filter(
-          (p: ApiPick) => p.leagueId === requestedLeagueId
+          (p: ApiPick) => p.leagueId === requestedLeagueId,
         );
 
         const map: Record<string, ApiPick> = {};
-
         for (const p of onlyThisLeague) map[p.matchId] = p;
+
         setPicksLeagueId(requestedLeagueId);
         setPicksByMatchId(map);
-
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Error cargando picks");
+      } catch (e: unknown) {
+        if (!cancelled) setError(getErrorMessage(e) || 'Error cargando picks');
       } finally {
         if (!cancelled) setLoadingPicks(false);
       }
@@ -430,13 +422,12 @@ export default function MatchesPage() {
     };
   }, [token, effectiveLeagueId]);
 
-  // Refetch de partidos cuando cambian filtros (phase/group)
-  // Importante: separado del effect inicial para no sobrescribir Sport/Competition/Season.
+  // Refetch cuando cambian filtros phase/group
   useEffect(() => {
     if (!token) return;
     if (!seasonId) return;
 
-    (async () => {
+    void (async () => {
       try {
         setLoading(true);
         setError(null);
@@ -448,8 +439,8 @@ export default function MatchesPage() {
         });
 
         setItems(data);
-      } catch (e: any) {
-        setError(e?.message ?? "Error aplicando filtros de partidos");
+      } catch (e: unknown) {
+        setError(getErrorMessage(e) || 'Error aplicando filtros');
       } finally {
         setLoading(false);
       }
@@ -467,33 +458,27 @@ export default function MatchesPage() {
 
   const phaseOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const m of allItems) {
-      const pc = (m as any).phaseCode as string | undefined;
+    for (const m of allItems as MatchWithExtras[]) {
+      const pc = m.phaseCode ?? undefined;
       if (pc) set.add(pc);
     }
     return Array.from(set.values()).sort();
   }, [allItems]);
 
-  // Todos los grupos del evento (season) sin importar fase:
-  // esto sirve para decidir si mostramos el filtro "Grupo" en UI.
   const allGroupOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const m of allItems) {
-      const gc = (m as any).groupCode as string | undefined;
+    for (const m of allItems as MatchWithExtras[]) {
+      const gc = m.groupCode ?? undefined;
       if (gc) set.add(gc);
     }
     return Array.from(set.values()).sort();
   }, [allItems]);
 
-  // Grupos disponibles según la fase seleccionada (data-driven)
   const groupOptions = useMemo(() => {
-    const base = phase
-      ? allItems.filter((m) => ((m as any).phaseCode as string | undefined) === phase)
-      : allItems;
-
+    const base = phase ? (allItems as MatchWithExtras[]).filter((m) => (m.phaseCode ?? '') === phase) : (allItems as MatchWithExtras[]);
     const set = new Set<string>();
     for (const m of base) {
-      const gc = (m as any).groupCode as string | undefined;
+      const gc = m.groupCode ?? undefined;
       if (gc) set.add(gc);
     }
     return Array.from(set.values()).sort();
@@ -501,20 +486,21 @@ export default function MatchesPage() {
 
   const showPhaseGroupFilters = phaseOptions.length > 0 || allGroupOptions.length > 0;
 
+  // Si el grupo actual no existe para la fase actual, lo limpiamos
   useEffect(() => {
     if (!group) return;
     if (groupOptions.includes(group)) return;
 
-    // Si el grupo guardado/URL no existe para la fase actual, lo limpiamos (evita inconsistencias)
-    localStorage.setItem("matchesGroup", "");
+    localStorage.setItem('matchesGroup', '');
 
     const params = new URLSearchParams(searchParams.toString());
-    params.delete("group");
+    params.delete('group');
 
     const qs = params.toString();
-    router.replace(`/${locale}/matches${qs ? `?${qs}` : ""}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group, groupOptions, locale]);
+    router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
+  }, [group, groupOptions, locale, router, searchParams]);
+
+  const selectedLocked = selected ? isLocked(selected as MatchWithExtras) : false;
 
   function openPickModal(match: ApiMatch) {
     setSaveError(null);
@@ -523,14 +509,14 @@ export default function MatchesPage() {
     const existing = picksByMatchId[match.id];
     setHomePred(existing ? String(existing.homePred) : '');
     setAwayPred(existing ? String(existing.awayPred) : '');
-    setKoWinnerTeamId(existing?.koWinnerTeamId ?? "");
+    setKoWinnerTeamId(existing?.koWinnerTeamId ?? '');
 
     setOpen(true);
   }
 
   async function onSave() {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    const t = localStorage.getItem('token');
+    if (!t) {
       router.push(`/${locale}/login`);
       return;
     }
@@ -540,8 +526,9 @@ export default function MatchesPage() {
     }
     if (!selected) return;
 
-    // Bloqueo defensivo (por si el usuario fuerza el click)
-    if (isLocked(selected)) {
+    const selectedMatch = selected as MatchWithExtras;
+
+    if (isLocked(selectedMatch)) {
       setSaveError('Este partido ya está cerrado. No puedes modificar tu pronóstico.');
       return;
     }
@@ -561,36 +548,22 @@ export default function MatchesPage() {
       return;
     }
 
-    const isKO = (selected as any).phaseCode && (selected as any).phaseCode !== "F01";
+    const phaseCode = selectedMatch.phaseCode ?? '';
+    const isKO = !!phaseCode && phaseCode !== 'F01';
     const isTie = hp === ap;
 
     if (isKO && isTie && !koWinnerTeamId) {
-      setSaveError("KO: Como pronosticaste empate, debes indicar quién avanza (Local o Visitante).");
+      setSaveError('KO: Como pronosticaste empate, debes indicar quién avanza (Local o Visitante).');
       return;
     }
 
-    // Si no es empate o no es KO, no debe quedar desempate guardado
     const finalKoWinnerTeamId = isKO && isTie ? koWinnerTeamId : null;
-
-    if (hp === null || ap === null || !Number.isFinite(hp) || !Number.isFinite(ap)) {
-      setSaveError('Debes indicar el marcador (Local y Visitante).');
-      return;
-    }
-    if (hp < 0 || ap < 0) {
-      setSaveError('El marcador no puede ser negativo.');
-      return;
-    }
-
-    if (isKO && isTie && !koWinnerTeamId) {
-      setSaveError("KO: Como pronosticaste empate, debes indicar quién avanza (Local o Visitante).");
-      return;
-    }
 
     setSaving(true);
     setSaveError(null);
 
     try {
-      const pick = await upsertPick(token, {
+      const pick = await upsertPick(t, {
         leagueId: effectiveLeagueId,
         matchId: selected.id,
         homePred: hp,
@@ -601,34 +574,28 @@ export default function MatchesPage() {
       setPicksByMatchId((prev) => ({ ...prev, [pick.matchId]: pick }));
       setOpen(false);
       setSelected(null);
-    } catch (e: any) {
-      setSaveError(e?.message ?? 'Error guardando pick');
+    } catch (e: unknown) {
+      setSaveError(getErrorMessage(e) || 'Error guardando pick');
     } finally {
       setSaving(false);
     }
   }
 
-  const selectedLocked = selected ? isLocked(selected) : false;
-
   function onChangeLeague(newLeagueId: string) {
     setLeagueId(newLeagueId);
-    setLeagueConfirmed(true); // ✅ el usuario la eligió manualmente
-    localStorage.setItem("activeLeagueId", newLeagueId);
+    setLeagueConfirmed(true);
+    localStorage.setItem('activeLeagueId', newLeagueId);
 
-    // Evita mostrar picks viejos mientras recarga (UI inmediato)
     setPicksByMatchId({});
     setPicksLeagueId(null);
     setSaveError(null);
-
-    // Importante: cambiar de liga NO debe resetear fase/grupo ni hacer router.replace.
-    // Los partidos son del evento (season), lo que cambia son los picks.
   }
 
+  const activeLeague = effectiveLeagueId ? leagues.find((l) => l.id === effectiveLeagueId) : null;
 
-  const activeLeague = effectiveLeagueId
-    ? leagues.find((l) => l.id === effectiveLeagueId)
-    : null;
   const aiContext = useMemo(() => {
+    const sel = selected as MatchWithExtras | null;
+
     return {
       page: 'matches',
       locale,
@@ -639,36 +606,21 @@ export default function MatchesPage() {
       phase,
       group,
       effectiveLeagueId,
-      activeLeague: activeLeague
-        ? { id: activeLeague.id, name: activeLeague.name, joinCode: activeLeague.joinCode }
-        : null,
-      selectedMatch: selected
+      activeLeague: activeLeague ? { id: activeLeague.id, name: activeLeague.name, joinCode: activeLeague.joinCode } : null,
+      selectedMatch: sel
         ? {
-          id: selected.id,
-          home: selected.homeTeam?.name ?? '',
-          away: selected.awayTeam?.name ?? '',
-          timeUtc: (selected as any).timeUtc ?? null,
-          utcDateTime: (selected as any).utcDateTime ?? null,
-          closeUtc: (selected as any).closeUtc ?? null,
-        }
+            id: sel.id,
+            home: sel.homeTeam?.name ?? '',
+            away: sel.awayTeam?.name ?? '',
+            timeUtc: sel.timeUtc ?? null,
+            utcDateTime: sel.utcDateTime ?? null,
+            closeUtc: sel.closeUtc ?? null,
+          }
         : null,
     };
-  }, [
-    locale,
-    token,
-    sportId,
-    competitionId,
-    seasonId,
-    phase,
-    group,
-    effectiveLeagueId,
-    activeLeague,
-    selected,
-  ]);
+  }, [activeLeague, competitionId, effectiveLeagueId, group, locale, phase, seasonId, selected, sportId, token]);
 
-  const activeLeagueLabel = activeLeague
-    ? `${activeLeague.name} · Código: ${activeLeague.joinCode}`
-    : "—";
+  const activeLeagueLabel = activeLeague ? `${activeLeague.name} · Código: ${activeLeague.joinCode}` : '—';
 
   return (
     <div className="min-h-screen">
@@ -679,7 +631,7 @@ export default function MatchesPage() {
             subtitle={
               <span className="text-[color:var(--muted)]">
                 Liga activa: {activeLeagueLabel}
-                {effectiveLeagueId && loadingPicks ? " · Cargando picks…" : ""}
+                {effectiveLeagueId && loadingPicks ? ' · Cargando picks…' : ''}
               </span>
             }
             actions={
@@ -688,18 +640,18 @@ export default function MatchesPage() {
                   variant="secondary"
                   size="sm"
                   onClick={() => {
-                    localStorage.setItem("matchesPhase", "");
-                    localStorage.setItem("matchesGroup", "");
+                    localStorage.setItem('matchesPhase', '');
+                    localStorage.setItem('matchesGroup', '');
 
-                    setSportId("");
-                    setCompetitionId("");
-                    setSeasonId("");
+                    setSportId('');
+                    setCompetitionId('');
+                    setSeasonId('');
                     setLeagueId(null);
                     setLeagueConfirmed(false);
                     setPicksLeagueId(null);
 
-                    localStorage.removeItem("activeSeasonId");
-                    localStorage.removeItem("activeLeagueId");
+                    localStorage.removeItem('activeSeasonId');
+                    localStorage.removeItem('activeLeagueId');
 
                     setPicksByMatchId({});
                     setItems([]);
@@ -713,12 +665,7 @@ export default function MatchesPage() {
                   Limpiar
                 </Button>
 
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => router.push(`/${locale}/leagues`)}
-                  title="Gestionar ligas"
-                >
+                <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/leagues`)} title="Gestionar ligas">
                   Ligas
                 </Button>
 
@@ -729,7 +676,7 @@ export default function MatchesPage() {
             }
           />
 
-          {/* Opción 2 — Cascada Sport → Competition → Event → League */}
+          {/* Cascada Sport → Competition → Event → League */}
           <Card className="p-4">
             <div className="grid grid-cols-1 gap-3">
               {/* Deporte */}
@@ -741,14 +688,12 @@ export default function MatchesPage() {
                   onChange={(e) => {
                     const v = e.target.value;
 
-                    // 1) Cambiar deporte y resetear cascada
                     setSportId(v);
-                    setCompetitionId("");
-                    setSeasonId("");
-                    localStorage.removeItem("activeSeasonId");
-                    localStorage.removeItem("activeLeagueId");
+                    setCompetitionId('');
+                    setSeasonId('');
+                    localStorage.removeItem('activeSeasonId');
+                    localStorage.removeItem('activeLeagueId');
 
-                    // 2) Limpiar selección dependiente y data visible (evita confusión)
                     setLeagueId(null);
                     setLeagueConfirmed(false);
                     setPicksByMatchId({});
@@ -757,12 +702,10 @@ export default function MatchesPage() {
                     setAllItems([]);
                     setError(null);
 
-                    // 3) Limpiar filtros (URL + localStorage)
-                    localStorage.setItem("matchesPhase", "");
-                    localStorage.setItem("matchesGroup", "");
+                    localStorage.setItem('matchesPhase', '');
+                    localStorage.setItem('matchesGroup', '');
                     router.replace(`/${locale}/matches`);
                   }}
-
                 >
                   <option value="">Seleccionar deporte</option>
                   {catalog.map((s) => (
@@ -783,9 +726,9 @@ export default function MatchesPage() {
                   onChange={(e) => {
                     const v = e.target.value;
                     setCompetitionId(v);
-                    setSeasonId("");
-                    localStorage.removeItem("activeSeasonId");
-                    localStorage.removeItem("activeLeagueId");
+                    setSeasonId('');
+                    localStorage.removeItem('activeSeasonId');
+                    localStorage.removeItem('activeLeagueId');
 
                     setLeagueId(null);
                     setLeagueConfirmed(false);
@@ -795,12 +738,10 @@ export default function MatchesPage() {
                     setAllItems([]);
                     setError(null);
 
-                    localStorage.setItem("matchesPhase", "");
-                    localStorage.setItem("matchesGroup", "");
+                    localStorage.setItem('matchesPhase', '');
+                    localStorage.setItem('matchesGroup', '');
                     router.replace(`/${locale}/matches`);
                   }}
-
-
                 >
                   <option value="">Seleccionar competición</option>
                   {competitionOptions.map((c) => (
@@ -821,15 +762,13 @@ export default function MatchesPage() {
                   onChange={(e) => {
                     const v = e.target.value;
 
-                    // 1) set evento
                     setSeasonId(v);
-                    if (v) localStorage.setItem("activeSeasonId", v);
-                    else localStorage.removeItem("activeSeasonId");
+                    if (v) localStorage.setItem('activeSeasonId', v);
+                    else localStorage.removeItem('activeSeasonId');
 
-                    // 2) reset inmediato (evita que se vea data vieja / picks viejos)
                     setLeagueId(null);
                     setLeagueConfirmed(false);
-                    localStorage.removeItem("activeLeagueId");
+                    localStorage.removeItem('activeLeagueId');
                     setPicksByMatchId({});
                     setPicksLeagueId(null);
                     setLoadingPicks(false);
@@ -837,12 +776,10 @@ export default function MatchesPage() {
                     setAllItems([]);
                     setError(null);
 
-                    // 3) reset filtros (URL + localStorage)
-                    localStorage.setItem("matchesPhase", "");
-                    localStorage.setItem("matchesGroup", "");
+                    localStorage.setItem('matchesPhase', '');
+                    localStorage.setItem('matchesGroup', '');
                     router.replace(`/${locale}/matches`);
                   }}
-
                 >
                   <option value="">Seleccionar evento</option>
                   {seasonOptions.map((s) => (
@@ -858,13 +795,13 @@ export default function MatchesPage() {
                 Liga
                 <select
                   className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
-                  value={effectiveLeagueId ?? ""}
+                  value={effectiveLeagueId ?? ''}
                   onChange={(e) => {
                     const v = e.target.value;
                     if (!v) {
                       setLeagueId(null);
                       setLeagueConfirmed(false);
-                      localStorage.removeItem("activeLeagueId");
+                      localStorage.removeItem('activeLeagueId');
                       setPicksByMatchId({});
                       setPicksLeagueId(null);
                       setSaveError(null);
@@ -899,20 +836,18 @@ export default function MatchesPage() {
                     value={phase}
                     onChange={(e) => {
                       const p = e.target.value;
-                      localStorage.setItem("matchesPhase", p);
-                      if (p) localStorage.setItem("matchesGroup", "");
+                      localStorage.setItem('matchesPhase', p);
+                      if (p) localStorage.setItem('matchesGroup', '');
 
                       const params = new URLSearchParams(searchParams.toString());
+                      if (p) params.set('phase', p);
+                      else params.delete('phase');
 
-                      if (p) params.set("phase", p);
-                      else params.delete("phase");
-
-                      // Al cambiar fase, limpiamos grupo para evitar inconsistencias entre eventos/fases
-                      localStorage.setItem("matchesGroup", "");
-                      params.delete("group");
+                      localStorage.setItem('matchesGroup', '');
+                      params.delete('group');
 
                       const qs = params.toString();
-                      router.replace(`/${locale}/matches${qs ? `?${qs}` : ""}`);
+                      router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
                     }}
                     title="Filtrar por fase"
                   >
@@ -933,22 +868,21 @@ export default function MatchesPage() {
                     disabled={!groupOptions.length}
                     onChange={(e) => {
                       const g = e.target.value;
-                      localStorage.setItem("matchesGroup", g);
+                      localStorage.setItem('matchesGroup', g);
 
                       const params = new URLSearchParams(searchParams.toString());
-
-                      if (g) params.set("group", g);
-                      else params.delete("group");
+                      if (g) params.set('group', g);
+                      else params.delete('group');
 
                       const qs = params.toString();
-                      router.replace(`/${locale}/matches${qs ? `?${qs}` : ""}`);
+                      router.replace(`/${locale}/matches${qs ? `?${qs}` : ''}`);
                     }}
                     title={
                       !allGroupOptions.length
-                        ? "Este evento no tiene grupos"
+                        ? 'Este evento no tiene grupos'
                         : !groupOptions.length
-                          ? "Esta fase no tiene grupos"
-                          : "Filtrar por grupo"
+                          ? 'Esta fase no tiene grupos'
+                          : 'Filtrar por grupo'
                     }
                   >
                     <option value="">Todos</option>
@@ -963,17 +897,9 @@ export default function MatchesPage() {
             </Card>
           )}
 
-          {loading && (
-            <Card className="p-4 text-[color:var(--muted)]">
-              Cargando partidos…
-            </Card>
-          )}
+          {loading && <Card className="p-4 text-[color:var(--muted)]">Cargando partidos…</Card>}
 
-          {error && (
-            <Card className="p-4 border border-red-500/30">
-              {error}
-            </Card>
-          )}
+          {error && <Card className="p-4 border border-red-500/30">{error}</Card>}
 
           {!loading &&
             !error &&
@@ -982,16 +908,14 @@ export default function MatchesPage() {
                 <div className="px-4 py-3 border-b border-[var(--border)] font-medium">{dateKey}</div>
 
                 <div className="divide-y divide-[var(--border)]">
-                  {matches.map((m) => {
-                    const myPick =
-                      effectiveLeagueId && picksLeagueId === effectiveLeagueId
-                        ? picksByMatchId[m.id]
-                        : undefined;
+                  {matches.map((m0) => {
+                    const m = m0 as MatchWithExtras;
+
+                    const myPick = effectiveLeagueId && picksLeagueId === effectiveLeagueId ? picksByMatchId[m.id] : undefined;
                     const locked = isLocked(m);
-                    const kickoffLabel = formatLocalDateTime(
-                      locale,
-                      (m as any).utcDateTime ?? (m as any).timeUtc ?? null
-                    );
+
+                    const kickoffLabel = formatLocalDateTime(locale, m.utcDateTime ?? m.timeUtc ?? null);
+
                     const closeTs = getCloseTs(m);
                     const remainingMs = closeTs ? closeTs - now : null;
                     const hasPick = !!myPick;
@@ -1002,21 +926,21 @@ export default function MatchesPage() {
                           <div className="font-medium truncate">
                             <span className="inline-flex items-center gap-2 min-w-0">
                               <TeamWithFlag
-                                name={m.homeTeam?.name ?? ""}
-                                flagKey={(m.homeTeam as any)?.flagKey ?? null}
-                                isPlaceholder={!!(m.homeTeam as any)?.isPlaceholder}
+                                name={m.homeTeam?.name ?? ''}
+                                flagKey={m.homeTeam?.flagKey ?? null}
+                                isPlaceholder={!!m.homeTeam?.isPlaceholder}
                               />
                               <span className="text-[color:var(--muted)]">vs</span>
                               <TeamWithFlag
-                                name={m.awayTeam?.name ?? ""}
-                                flagKey={(m.awayTeam as any)?.flagKey ?? null}
-                                isPlaceholder={!!(m.awayTeam as any)?.isPlaceholder}
+                                name={m.awayTeam?.name ?? ''}
+                                flagKey={m.awayTeam?.flagKey ?? null}
+                                isPlaceholder={!!m.awayTeam?.isPlaceholder}
                               />
                             </span>
                           </div>
 
                           <div className="text-sm text-[color:var(--muted)] truncate">
-                            {m.timeUtc} UTC · {m.venue ?? "—"}
+                            {m.timeUtc} UTC · {m.venue ?? '—'}
                           </div>
 
                           {effectiveLeagueId && myPick && (
@@ -1027,7 +951,7 @@ export default function MatchesPage() {
                           )}
 
                           <div className="text-xs text-[color:var(--muted)] mt-2">
-                            <div>Hora local: {kickoffLabel || "—"}</div>
+                            <div>Hora local: {kickoffLabel || '—'}</div>
                             {closeTs ? (
                               locked ? (
                                 <div className="text-red-500">Cerrado</div>
@@ -1045,9 +969,7 @@ export default function MatchesPage() {
                         <div className="flex items-center gap-3">
                           {m.score ? (
                             <div className="flex flex-col items-end">
-                              <div className="text-[11px] text-[color:var(--muted)] leading-none mb-1">
-                                Resultado oficial del partido
-                              </div>
+                              <div className="text-[11px] text-[color:var(--muted)] leading-none mb-1">Resultado oficial del partido</div>
                               <div className="px-3 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm">
                                 {m.score.home} - {m.score.away}
                               </div>
@@ -1060,22 +982,22 @@ export default function MatchesPage() {
 
                           <Button
                             size="sm"
-                            variant={locked ? "outline" : "primary"}
+                            variant={locked ? 'outline' : 'primary'}
                             onClick={() => openPickModal(m)}
                             disabled={!effectiveLeagueId || locked || loadingPicks}
                             title={
                               !effectiveLeagueId
-                                ? "Selecciona una liga primero"
+                                ? 'Selecciona una liga primero'
                                 : loadingPicks
-                                  ? "Cargando picks de la liga..."
+                                  ? 'Cargando picks de la liga...'
                                   : locked
-                                    ? "Partido cerrado. Pick bloqueado."
+                                    ? 'Partido cerrado. Pick bloqueado.'
                                     : hasPick
-                                      ? "Editar pronóstico"
-                                      : "Pronosticar"
+                                      ? 'Editar pronóstico'
+                                      : 'Pronosticar'
                             }
                           >
-                            {locked ? "Cerrado" : hasPick ? "Editar" : "Pronosticar"}
+                            {locked ? 'Cerrado' : hasPick ? 'Editar' : 'Pronosticar'}
                           </Button>
                         </div>
                       </div>
@@ -1090,167 +1012,159 @@ export default function MatchesPage() {
           )}
 
           {!loading && !error && seasonId && !effectiveLeagueId && visibleLeagues.length > 1 && (
-            <Card className="p-4 text-[color:var(--muted)]">No hay partidos para este evento.</Card>
+            <Card className="p-4 text-[color:var(--muted)]">Selecciona una liga para ver/editar tus picks.</Card>
           )}
-
         </div>
 
         {/* Chatbot IA */}
         <AiChatWidget locale={locale} token={token} context={aiContext} />
 
         {/* MODAL */}
-        {
-          open && selected && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-              <Card className="w-full max-w-md p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm text-[color:var(--muted)]">Pronóstico</div>
-                    <div className="text-lg font-semibold">
-                      <span className="inline-flex items-center gap-2 min-w-0">
-                        <TeamWithFlag
-                          name={selected.homeTeam?.name ?? ""}
-                          flagKey={(selected.homeTeam as any)?.flagKey ?? null}
-                          isPlaceholder={!!(selected.homeTeam as any)?.isPlaceholder}
-                        />
-                        <span className="text-[color:var(--muted)]">vs</span>
-                        <TeamWithFlag
-                          name={selected.awayTeam?.name ?? ""}
-                          flagKey={(selected.awayTeam as any)?.flagKey ?? null}
-                          isPlaceholder={!!(selected.awayTeam as any)?.isPlaceholder}
-                        />
-                      </span>
-                    </div>
-                    <div className="text-sm text-[color:var(--muted)] mt-1">
-                      {selected.dateKey} · {selected.timeUtc} UTC
-                    </div>
+        {open && selected && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <Card className="w-full max-w-md p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm text-[color:var(--muted)]">Pronóstico</div>
+                  <div className="text-lg font-semibold">
+                    <span className="inline-flex items-center gap-2 min-w-0">
+                      <TeamWithFlag
+                        name={(selected as MatchWithExtras).homeTeam?.name ?? ''}
+                        flagKey={(selected as MatchWithExtras).homeTeam?.flagKey ?? null}
+                        isPlaceholder={!!(selected as MatchWithExtras).homeTeam?.isPlaceholder}
+                      />
+                      <span className="text-[color:var(--muted)]">vs</span>
+                      <TeamWithFlag
+                        name={(selected as MatchWithExtras).awayTeam?.name ?? ''}
+                        flagKey={(selected as MatchWithExtras).awayTeam?.flagKey ?? null}
+                        isPlaceholder={!!(selected as MatchWithExtras).awayTeam?.isPlaceholder}
+                      />
+                    </span>
                   </div>
-
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setOpen(false);
-                      setSelected(null);
-                    }}
-                  >
-                    X
-                  </Button>
+                  <div className="text-sm text-[color:var(--muted)] mt-1">
+                    {selected.dateKey} · {selected.timeUtc} UTC
+                  </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-sm text-[color:var(--muted)]">
-                      <TeamWithFlag
-                        name={selected.homeTeam?.name ?? ""}
-                        flagKey={(selected.homeTeam as any)?.flagKey ?? null}
-                        isPlaceholder={!!(selected.homeTeam as any)?.isPlaceholder}
-                      />
-                    </div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={50}
-                      value={homePred}
-                      onChange={(e) => setHomePred(e.target.value)}
-                      disabled={selectedLocked}
-                      className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setOpen(false);
+                    setSelected(null);
+                  }}
+                >
+                  X
+                </Button>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-sm text-[color:var(--muted)]">
+                    <TeamWithFlag
+                      name={(selected as MatchWithExtras).homeTeam?.name ?? ''}
+                      flagKey={(selected as MatchWithExtras).homeTeam?.flagKey ?? null}
+                      isPlaceholder={!!(selected as MatchWithExtras).homeTeam?.isPlaceholder}
                     />
                   </div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={homePred}
+                    onChange={(e) => setHomePred(e.target.value)}
+                    disabled={selectedLocked}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                  />
+                </div>
 
-                  <div>
-                    <div className="text-sm text-[color:var(--muted)]">
-                      <TeamWithFlag
-                        name={selected.awayTeam?.name ?? ""}
-                        flagKey={(selected.awayTeam as any)?.flagKey ?? null}
-                        isPlaceholder={!!(selected.awayTeam as any)?.isPlaceholder}
-                      />
-                    </div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={50}
-                      value={awayPred}
-                      onChange={(e) => setAwayPred(e.target.value)}
-                      disabled={selectedLocked}
-                      className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                <div>
+                  <div className="text-sm text-[color:var(--muted)]">
+                    <TeamWithFlag
+                      name={(selected as MatchWithExtras).awayTeam?.name ?? ''}
+                      flagKey={(selected as MatchWithExtras).awayTeam?.flagKey ?? null}
+                      isPlaceholder={!!(selected as MatchWithExtras).awayTeam?.isPlaceholder}
                     />
                   </div>
-
-                  {((selected as any).phaseCode && (selected as any).phaseCode !== "F01") &&
-                    homePred.trim() !== "" &&
-                    awayPred.trim() !== "" &&
-                    Number(homePred) === Number(awayPred) ? (
-                    <Card className="mt-3 p-3">
-                      <div className="text-sm font-medium text-[var(--foreground)]">KO: ¿Quién avanza?</div>
-                      <div className="text-xs text-[color:var(--muted)] mt-1">
-                        Como pronosticaste empate, debes elegir quién pasa a la siguiente fase.
-                      </div>
-
-                      <div className="mt-2 flex items-center gap-2">
-                        <select
-                          className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
-                          value={koWinnerTeamId}
-                          onChange={(e) => setKoWinnerTeamId(e.target.value)}
-                        >
-                          <option value="">— Selecciona —</option>
-                          <option value={selected.homeTeam.id}>{selected.homeTeam.name}</option>
-                          <option value={selected.awayTeam.id}>{selected.awayTeam.name}</option>
-                        </select>
-
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setKoWinnerTeamId("")}
-                          title="Quitar selección"
-                        >
-                          Limpiar
-                        </Button>
-                      </div>
-                    </Card>
-                  ) : null}
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={awayPred}
+                    onChange={(e) => setAwayPred(e.target.value)}
+                    disabled={selectedLocked}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                  />
                 </div>
 
-                {selectedLocked && (
-                  <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/30 p-2 text-sm text-amber-200">
-                    Este partido ya está cerrado. No puedes modificar tu pronóstico.
-                  </div>
-                )}
+                {(() => {
+                  const sel = selected as MatchWithExtras;
+                  const phaseCode = sel.phaseCode ?? '';
+                  const isKO = !!phaseCode && phaseCode !== 'F01';
 
-                {saveError && (
-                  <div className="mt-3 rounded-lg border border-red-900 bg-red-950/50 p-2 text-sm text-red-200">
-                    {saveError}
-                  </div>
-                )}
+                  return (
+                    isKO &&
+                    homePred.trim() !== '' &&
+                    awayPred.trim() !== '' &&
+                    Number(homePred) === Number(awayPred) && (
+                      <Card className="mt-3 p-3">
+                        <div className="text-sm font-medium text-[var(--foreground)]">KO: ¿Quién avanza?</div>
+                        <div className="text-xs text-[color:var(--muted)] mt-1">
+                          Como pronosticaste empate, debes elegir quién pasa a la siguiente fase.
+                        </div>
 
-                <div className="mt-4 flex justify-end gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setOpen(false);
-                      setSelected(null);
-                    }}
-                    disabled={saving}
-                  >
-                    Cancelar
-                  </Button>
+                        <div className="mt-2 flex items-center gap-2">
+                          <select
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+                            value={koWinnerTeamId}
+                            onChange={(e) => setKoWinnerTeamId(e.target.value)}
+                          >
+                            <option value="">— Selecciona —</option>
+                            <option value={sel.homeTeam?.id ?? ''}>{sel.homeTeam?.name ?? 'Local'}</option>
+                            <option value={sel.awayTeam?.id ?? ''}>{sel.awayTeam?.name ?? 'Visitante'}</option>
+                          </select>
 
-                  <Button
-                    onClick={onSave}
-                    variant={selectedLocked ? "outline" : "primary"}
-                    size="sm"
-                    disabled={saving || selectedLocked}
-                  >
-                    {selectedLocked ? "Cerrado" : saving ? "Guardando…" : "Guardar"}
-                  </Button>
+                          <Button type="button" size="sm" variant="secondary" onClick={() => setKoWinnerTeamId('')} title="Quitar selección">
+                            Limpiar
+                          </Button>
+                        </div>
+                      </Card>
+                    )
+                  );
+                })()}
+              </div>
+
+              {selectedLocked && (
+                <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/30 p-2 text-sm text-amber-200">
+                  Este partido ya está cerrado. No puedes modificar tu pronóstico.
                 </div>
-              </Card>
-            </div>
-          )
-        }
+              )}
+
+              {saveError && (
+                <div className="mt-3 rounded-lg border border-red-900 bg-red-950/50 p-2 text-sm text-red-200">{saveError}</div>
+              )}
+
+              <div className="mt-4 flex justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setOpen(false);
+                    setSelected(null);
+                  }}
+                  disabled={saving}
+                >
+                  Cancelar
+                </Button>
+
+                <Button onClick={onSave} variant={selectedLocked ? 'outline' : 'primary'} size="sm" disabled={saving || selectedLocked}>
+                  {selectedLocked ? 'Cerrado' : saving ? 'Guardando…' : 'Guardar'}
+                </Button>
+              </div>
+            </Card>
+          </div>
+        )}
       </div>
-    </div >
+    </div>
   );
 }

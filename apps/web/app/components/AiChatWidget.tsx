@@ -8,7 +8,14 @@ function getApiBase() {
   return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 }
 
-export function AiChatWidget(props: { locale: string; token?: string | null; context?: any }) {
+type AiChatWidgetProps = {
+  locale: string;
+  token?: string | null;
+  // ✅ Evita any: el contexto es dinámico, así que unknown/Record es lo correcto
+  context?: Record<string, unknown> | null;
+};
+
+export function AiChatWidget(props: AiChatWidgetProps) {
   const { locale, token = null, context = {} } = props;
 
   const [open, setOpen] = useState(false);
@@ -59,7 +66,7 @@ export function AiChatWidget(props: { locale: string; token?: string | null; con
         },
         body: JSON.stringify({
           locale,
-          context,
+          context: context ?? {},
           messages: next,
         }),
       });
@@ -69,11 +76,18 @@ export function AiChatWidget(props: { locale: string; token?: string | null; con
         throw new Error(txt || 'Error llamando a /ai/chat');
       }
 
-      const data = await res.json();
-      const reply = String(data?.reply ?? '').trim();
+      const data: unknown = await res.json();
+
+      const reply =
+        typeof data === 'object' && data !== null && 'reply' in data
+          ? String((data as { reply?: unknown }).reply ?? '').trim()
+          : '';
+
       setMessages((prev) => [...prev, { role: 'assistant', content: reply || '—' }]);
-    } catch (e: any) {
-      setErr(e?.message ?? 'Error de IA');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Error de IA';
+      setErr(msg);
+
       setMessages((prev) => [
         ...prev,
         {

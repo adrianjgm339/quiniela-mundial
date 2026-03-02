@@ -28,21 +28,59 @@ type User = {
   createdAt: string;
 };
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const { locale } = useParams<{ locale: string }>();
 
-  type ActiveSeason = null | {
+type PickLite = {
+  matchId: string;
+  homePred: number;
+  awayPred: number;
+  koWinnerTeamId?: string | null;
+};
+
+type ActiveSeason = null | {
+  id: string;
+  slug: string;
+  name: string;
+  competition: {
     id: string;
     slug: string;
     name: string;
-    competition: {
-      id: string;
-      slug: string;
-      name: string;
-      sport: { id: string; slug: string; name: string };
-    };
+    sport: { id: string; slug: string; name: string };
   };
+};
+
+type MeResponse = User & {
+  activeSeason?: ActiveSeason | null;
+  countryCode?: string | null;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getString(obj: unknown, key: string): string | null {
+  if (!isRecord(obj)) return null;
+  const v = obj[key];
+  return typeof v === "string" ? v : null;
+}
+
+function getBool(obj: unknown, key: string): boolean {
+  if (!isRecord(obj)) return false;
+  return obj[key] === true;
+}
+
+function getTeamFlagKey(team: unknown): string | null {
+  return getString(team, "flagKey");
+}
+
+function getTeamIsPlaceholder(team: unknown): boolean {
+  return getBool(team, "isPlaceholder");
+}
+
+
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const { locale } = useParams<{ locale: string }>();
 
   const [user, setUser] = useState<User | null>(null);
   const [activeSeason, setActiveSeason] = useState<ActiveSeason>(null);
@@ -61,7 +99,7 @@ export default function DashboardPage() {
   const [topScope, setTopScope] = useState<"LEAGUE" | "WORLD" | null>(null);
   const [activeLeagueId, setActiveLeagueId] = useState<string>("");
   const [picksLoading, setPicksLoading] = useState(false);
-  const [pickByMatchId, setPickByMatchId] = useState<Record<string, any>>({});
+  const [pickByMatchId, setPickByMatchId] = useState<Record<string, PickLite>>({});
   const [myTopRow, setMyTopRow] = useState<LeaderboardRow | null>(null);
 
   const [pointsBreakdown, setPointsBreakdown] = useState<ApiPointsBreakdown | null>(null);
@@ -124,7 +162,7 @@ export default function DashboardPage() {
         const picks = await listPicks(t, activeLeagueId);
         if (cancelled) return;
 
-        const map: Record<string, any> = {};
+        const map: Record<string, PickLite> = {};
         for (const p of picks) {
           // matchId es lo importante para el dashboard
           map[p.matchId] = p;
@@ -321,7 +359,7 @@ export default function DashboardPage() {
           setMyTopRow(null);
           setPointsBreakdown(null);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         // No tumbamos dashboard por widgets
         console.error("Dashboard widgets error", e);
       } finally {
@@ -335,7 +373,9 @@ export default function DashboardPage() {
         setUser(data);
 
         const localSeasonId = localStorage.getItem("activeSeasonId") ?? "";
-        const serverActive = (data as any)?.activeSeason ?? null;
+        const dataMe = data as unknown as MeResponse;
+
+        const serverActive = dataMe.activeSeason ?? null;
 
         // Solo usamos el activeSeason del backend si:
         // - no hay uno en localStorage, o
@@ -346,8 +386,8 @@ export default function DashboardPage() {
           setActiveSeason(serverActive);
         }
 
-        if ((data as any)?.countryCode) {
-          localStorage.setItem("countryCode", (data as any).countryCode);
+        if (dataMe.countryCode) {
+          localStorage.setItem("countryCode", dataMe.countryCode);
         }
       })
 
@@ -515,14 +555,14 @@ export default function DashboardPage() {
                           <span className="inline-flex items-center gap-2 min-w-0">
                             <TeamWithFlag
                               name={m.homeTeam?.name ?? ""}
-                              flagKey={(m.homeTeam as any)?.flagKey ?? null}
-                              isPlaceholder={!!(m.homeTeam as any)?.isPlaceholder}
+                              flagKey={getTeamFlagKey(m.homeTeam)}
+                              isPlaceholder={getTeamIsPlaceholder(m.homeTeam)}
                             />
                             <span className="text-[color:var(--muted)]">vs</span>
                             <TeamWithFlag
                               name={m.awayTeam?.name ?? ""}
-                              flagKey={(m.awayTeam as any)?.flagKey ?? null}
-                              isPlaceholder={!!(m.awayTeam as any)?.isPlaceholder}
+                              flagKey={getTeamFlagKey(m.awayTeam)}
+                              isPlaceholder={getTeamIsPlaceholder(m.awayTeam)}
                             />
                           </span>
                         </div>

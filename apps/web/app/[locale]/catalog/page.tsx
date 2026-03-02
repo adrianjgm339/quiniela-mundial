@@ -19,7 +19,11 @@ export default function CatalogPage() {
   const [competitionId, setCompetitionId] = useState<string>("");
 
   useEffect(() => {
-    setLoadError(null);
+    // ✅ Evita setState sincrónico dentro del effect (regla react-hooks/set-state-in-effect)
+    Promise.resolve().then(() => {
+      setLoadError(null);
+      setData(null);
+    });
 
     getCatalog(locale)
       .then((sports) => {
@@ -50,7 +54,9 @@ export default function CatalogPage() {
   }, [locale]);
 
   const sport = useMemo(() => data?.find((s) => s.id === sportId), [data, sportId]);
-  const competitions: Competition[] = sport?.competitions ?? [];
+
+  // ✅ Evita warning de deps: no creamos un array nuevo en cada render
+  const competitions = useMemo<Competition[]>(() => sport?.competitions ?? [], [sport]);
 
   const competition = useMemo(
     () => competitions.find((c) => c.id === competitionId),

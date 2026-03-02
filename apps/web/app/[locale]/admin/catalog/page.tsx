@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
     getCatalog,
     me,
     type CatalogSport,
-    adminCreateSport,
     adminUpdateSport,
     adminDeleteSport,
     adminCreateCompetition,
@@ -19,990 +18,749 @@ import {
     type ApiScoringRule,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-const controlBase =
-    "w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm " +
-    "text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] " +
-    "disabled:opacity-60 disabled:cursor-not-allowed";
-const controlInput = controlBase;
-const controlSelect = controlBase;
-
-
-type User = {
-    id: string;
-    email: string;
-    displayName: string;
-    role: string;
-    createdAt: string;
-};
-
-type NamesById = Record<string, { es?: string; en?: string }>;
-
-function getItemNames(map: NamesById, id: string) {
-    return map[id] ?? {};
-}
 
 export default function AdminCatalogPage() {
     const router = useRouter();
-    const { locale } = useParams<{ locale: string }>();
+    const params = useParams();
+    const locale = String(params?.locale ?? "es");
 
-    const [user, setUser] = useState<User | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const [token, setToken] = useState<string>("");
+    const [user, setUser] = useState<{ id: string; email: string; displayName: string; role: string } | null>(null);
+    const [authError, setAuthError] = useState<string | null>(null);
 
-    const [sports, setSports] = useState<CatalogSport[]>([]);
+    const [catalog, setCatalog] = useState<CatalogSport[]>([]);
     const [loadingCatalog, setLoadingCatalog] = useState(false);
+    const [catalogError, setCatalogError] = useState<string | null>(null);
 
-    // Reglas disponibles (para defaultScoringRuleId por evento)
-    const [ruleOptions, setRuleOptions] = useState<ApiScoringRule[]>([]);
+    const [rules, setRules] = useState<ApiScoringRule[]>([]);
     const [loadingRules, setLoadingRules] = useState(false);
+    const [rulesError, setRulesError] = useState<string | null>(null);
 
-    // Create Season: regla estándar obligatoria
-    const [newSeasonDefaultRuleId, setNewSeasonDefaultRuleId] = useState<string>("B01");
+    // Selección actual (para editar / borrar)
+    const [selectedSportId, setSelectedSportId] = useState<string>("");
+    const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>("");
+    const [selectedSeasonId, setSelectedSeasonId] = useState<string>("");
 
-    // Edit Season: regla estándar (la cargaremos desde catálogo/back cuando esté disponible)
-    const [editSeasonDefaultRuleId, setEditSeasonDefaultRuleId] = useState<string>("B01");
+    // Edit: Sport
+    const [editSportId, setEditSportId] = useState<string>("");
+    const [sportSlug, setSportSlug] = useState("");
+    const [sportName, setSportName] = useState("");
 
+    // Edit: Competition
+    const [editCompetitionId, setEditCompetitionId] = useState<string>("");
+    const [competitionSlug, setCompetitionSlug] = useState("");
+    const [competitionName, setCompetitionName] = useState("");
+    const [competitionDefaultRuleId, setCompetitionDefaultRuleId] = useState<string>("");
 
-    // 🔴 Importante: NO preseleccionar nada por defecto (como pediste)
-    const [selectedSportId, setSelectedSportId] = useState<string | null>(null);
-    const [selectedCompetitionId, setSelectedCompetitionId] = useState<string | null>(null);
+    // Edit: Season
+    const [editSeasonId, setEditSeasonId] = useState<string>("");
+    const [seasonSlug, setSeasonSlug] = useState("");
+    const [seasonName, setSeasonName] = useState("");
+    const [seasonStartDate, setSeasonStartDate] = useState<string>("");
+    const [seasonEndDate, setSeasonEndDate] = useState<string>("");
+    const [seasonDefaultRuleId, setSeasonDefaultRuleId] = useState<string>("");
 
-    // Mapas para multi-idioma (ES/EN) por ID, para poder editar sin inventar
-    const [namesBySportId, setNamesBySportId] = useState<NamesById>({});
-    const [namesByCompetitionId, setNamesByCompetitionId] = useState<NamesById>({});
-    const [namesBySeasonId, setNamesBySeasonId] = useState<NamesById>({});
-
-    // Forms: Create
-    const [newSportEs, setNewSportEs] = useState("");
-    const [newSportEn, setNewSportEn] = useState("");
-
-    const [newCompEs, setNewCompEs] = useState("");
-    const [newCompEn, setNewCompEn] = useState("");
-
-    const [newSeasonEs, setNewSeasonEs] = useState("");
-    const [newSeasonEn, setNewSeasonEn] = useState("");
-
-    // Forms: Edit (simple)
-    const [editSportId, setEditSportId] = useState<string | null>(null);
-    const [editSportEs, setEditSportEs] = useState("");
-    const [editSportEn, setEditSportEn] = useState("");
-
-    const [editCompetitionId, setEditCompetitionId] = useState<string | null>(null);
-    const [editCompEs, setEditCompEs] = useState("");
-    const [editCompEn, setEditCompEn] = useState("");
-
-    const [editSeasonId, setEditSeasonId] = useState<string | null>(null);
-    const [editSeasonEs, setEditSeasonEs] = useState("");
-    const [editSeasonEn, setEditSeasonEn] = useState("");
-
-    function closeAllEdits() {
-        // Cerrar edición de deporte
-        setEditSportId(null);
-        setEditSportEs("");
-        setEditSportEn("");
-
-        // Cerrar edición de competición
-        setEditCompetitionId(null);
-        setEditCompEs("");
-        setEditCompEn("");
-
-        // Cerrar edición de evento (season)
-        setEditSeasonId(null);
-        setEditSeasonEs("");
-        setEditSeasonEn("");
-        setEditSeasonDefaultRuleId("B01");
-    }
-
-    // --- Guard ADMIN (mismo patrón que /admin)
+    // -------------------------
+    // Bootstrap auth/token
+    // -------------------------
     useEffect(() => {
-        const token = localStorage.getItem("token");
-        if (!token) {
-            router.replace(`/${locale}/login`);
-            return;
-        }
+        const t = localStorage.getItem("token") ?? "";
+        setToken(t);
+    }, []);
 
-        me(token, locale)
-            .then((data: any) => {
-                if (data?.role !== "ADMIN") {
-                    router.replace(`/${locale}/dashboard`);
-                    return;
-                }
-                setUser(data);
-            })
-            .catch((err) => {
-                setError(err?.message ?? "Error");
-                localStorage.removeItem("token");
-                router.replace(`/${locale}/login`);
-            });
-    }, [router, locale]);
-
-    // Helper: construir mapas de nombres ES/EN por id, usando el /catalog (read)
-    function buildNameMaps(sportsLocale: CatalogSport[], localeKey: "es" | "en", prev?: { s: NamesById; c: NamesById; se: NamesById }) {
-        const sMap: NamesById = { ...(prev?.s ?? {}) };
-        const cMap: NamesById = { ...(prev?.c ?? {}) };
-        const seMap: NamesById = { ...(prev?.se ?? {}) };
-
-        for (const s of sportsLocale) {
-            sMap[s.id] = { ...(sMap[s.id] ?? {}), [localeKey]: s.name };
-            for (const c of s.competitions ?? []) {
-                cMap[c.id] = { ...(cMap[c.id] ?? {}), [localeKey]: c.name };
-                for (const se of c.seasons ?? []) {
-                    seMap[se.id] = { ...(seMap[se.id] ?? {}), [localeKey]: se.name };
-                }
-            }
-        }
-
-        return { s: sMap, c: cMap, se: seMap };
-    }
-
-    async function reloadRules(seasonId?: string | null) {
-        const token = localStorage.getItem("token");
+    useEffect(() => {
         if (!token) return;
 
-        // Si no hay evento (season) de contexto, no mostramos reglas
-        if (!seasonId) {
-            setRuleOptions([]);
+        setAuthError(null);
+        me(token, locale)
+            .then((u) => {
+                setUser({ id: u.id, email: u.email, displayName: u.displayName, role: u.role });
+                if (u.role !== "ADMIN") {
+                    setAuthError("No tienes permisos de administrador.");
+                }
+            })
+            .catch((e: unknown) => {
+                setAuthError(e instanceof Error ? e.message : "Error autenticando");
+            });
+    }, [token, locale]);
+
+    const canAdmin = useMemo(() => user?.role === "ADMIN" && !authError, [user, authError]);
+
+    // -------------------------
+    // Load catalog + rules
+    // -------------------------
+    const reloadCatalog = useCallback(async () => {
+        setLoadingCatalog(true);
+        setCatalogError(null);
+        try {
+            const sports = await getCatalog(locale);
+            setCatalog(sports);
+        } catch (e: unknown) {
+            setCatalogError(e instanceof Error ? e.message : "Error cargando catálogo");
+        } finally {
+            setLoadingCatalog(false);
+        }
+    }, [locale]);
+
+    const reloadRules = async (seasonId?: string) => {
+        if (!token) return;
+
+        const sid = (seasonId ?? "").trim();
+        if (!sid) {
+            setRules([]);
             return;
         }
 
         setLoadingRules(true);
+        setRulesError(null);
         try {
-            // ✅ Clave: pedir reglas filtradas por el evento (igual que /admin/rules)
-            const list = await listScoringRules(token, seasonId);
-            setRuleOptions(list ?? []);
-
-            // Mantener consistencia de selección en "Crear evento"
-            if (list?.length && !list.some((r) => r.id === newSeasonDefaultRuleId)) {
-                setNewSeasonDefaultRuleId(list[0].id);
-            }
-
-            // Mantener consistencia de selección en "Editar evento"
-            if (list?.length && !list.some((r) => r.id === editSeasonDefaultRuleId)) {
-                setEditSeasonDefaultRuleId(list[0].id);
-            }
-        } catch (e) {
-            // no bloquea el catálogo si falla, pero idealmente debe cargar
-            setRuleOptions([]);
+            const rr = await listScoringRules(token, sid);
+            setRules(rr);
+        } catch (e: unknown) {
+            setRulesError(e instanceof Error ? e.message : "Error cargando reglas");
+            setRules([]);
         } finally {
             setLoadingRules(false);
         }
-    }
+    };
 
-    async function reloadCatalog() {
-        setLoadingCatalog(true);
-        setError(null);
-
-        try {
-            // 1) Catálogo en el locale actual (lo que se renderiza)
-            const main = await getCatalog(locale);
-            setSports(main ?? []);
-
-            // 2) Multi-idioma: también cargar ES y EN para permitir editar nombres en ambos
-            //    (si ya estamos en es/en, igual cargamos el otro)
-            const needEs = locale !== "es";
-            const needEn = locale !== "en";
-
-            let maps = buildNameMaps(main ?? [], (locale === "en" ? "en" : "es") as "es" | "en");
-
-            if (needEs) {
-                const esCat = await getCatalog("es");
-                maps = buildNameMaps(esCat ?? [], "es", maps);
-            }
-            if (needEn) {
-                const enCat = await getCatalog("en");
-                maps = buildNameMaps(enCat ?? [], "en", maps);
-            }
-
-            setNamesBySportId(maps.s);
-            setNamesByCompetitionId(maps.c);
-            setNamesBySeasonId(maps.se);
-
-            // NO tocar selectedSportId/selectedCompetitionId (no defaults)
-            // Solo si el seleccionado ya no existe, lo limpiamos.
-            if (selectedSportId && !(main ?? []).some((s) => s.id === selectedSportId)) {
-                setSelectedSportId(null);
-                setSelectedCompetitionId(null);
-            } else if (selectedSportId) {
-                const s = (main ?? []).find((x) => x.id === selectedSportId);
-                if (selectedCompetitionId && s && !s.competitions.some((c) => c.id === selectedCompetitionId)) {
-                    setSelectedCompetitionId(null);
-                }
-            }
-        } catch (e: any) {
-            setError(e?.message ?? "Error cargando catálogo");
-        } finally {
-            setLoadingCatalog(false);
-        }
-    }
-
-    // --- Cargar catálogo al entrar / cambiar locale
     useEffect(() => {
         reloadCatalog();
-        reloadRules(null);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [locale]);
+    }, [reloadCatalog]);
 
-    const selectedSport = useMemo(() => {
-        if (!selectedSportId) return null;
-        return sports.find((s) => s.id === selectedSportId) ?? null;
-    }, [sports, selectedSportId]);
+    // -------------------------
+    // Helpers
+    // -------------------------
+    const closeAllEdits = () => {
+        setEditSportId("");
+        setSportSlug("");
+        setSportName("");
 
-    const competitions = useMemo(() => selectedSport?.competitions ?? [], [selectedSport]);
+        setEditCompetitionId("");
+        setCompetitionSlug("");
+        setCompetitionName("");
+        setCompetitionDefaultRuleId("");
 
-    const selectedCompetition = useMemo(() => {
-        if (!selectedCompetitionId) return null;
-        return competitions.find((c) => c.id === selectedCompetitionId) ?? null;
-    }, [competitions, selectedCompetitionId]);
+        setEditSeasonId("");
+        setSeasonSlug("");
+        setSeasonName("");
+        setSeasonStartDate("");
+        setSeasonEndDate("");
+        setSeasonDefaultRuleId("");
+    };
 
-    const seasons = useMemo(() => selectedCompetition?.seasons ?? [], [selectedCompetition]);
+    const findSport = (sportId: string) => catalog.find((s) => s.id === sportId);
+    const findCompetition = (sportId: string, competitionId: string) =>
+        catalog
+            .find((s) => s.id === sportId)
+            ?.competitions?.find((c) => c.id === competitionId);
 
-    // seasonId "de contexto" para filtrar las reglas del dropdown en Catálogo.
-    // - Si estoy editando un evento, filtro por ese evento.
-    // - Si no, filtro por el primer evento de la competición seleccionada (si existe).
-    const rulesSeasonId = useMemo(() => {
-        if (editSeasonId) return editSeasonId;
-        return seasons[0]?.id ?? null;
-    }, [editSeasonId, seasons]);
+    const findSeason = (sportId: string, competitionId: string, seasonId: string) =>
+        findCompetition(sportId, competitionId)?.seasons?.find((se) => se.id === seasonId);
 
-    // Cada vez que cambie el evento de contexto, recargamos reglas filtradas por seasonId
-    useEffect(() => {
-        closeAllEdits();
+    // -------------------------
+    // Actions: Sport
+    // -------------------------
+    const onCreateSport = async () => {
+        if (!token) return;
+        if (!sportSlug.trim() || !sportName.trim()) return;
 
-        // Si no hay competición seleccionada o no hay season disponible, el combo queda vacío
-        if (!selectedCompetitionId || !rulesSeasonId) {
-            setRuleOptions([]);
-            return;
+        try {
+            await adminUpdateSport(token, editSportId, { es: sportName.trim(), en: sportName.trim(), slug: sportSlug.trim() });
+            closeAllEdits();
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error creando sport");
         }
+    };
+
+    const onStartEditSport = (sportId: string) => {
+        closeAllEdits();
+        const s = findSport(sportId);
+        if (!s) return;
+
+        setEditSportId(s.id);
+        setSportSlug(s.slug);
+        setSportName(s.name);
+        setSelectedSportId(s.id);
+        setSelectedCompetitionId("");
+        setSelectedSeasonId("");
+    };
+
+    const onSaveEditSport = async () => {
+        if (!token || !editSportId) return;
+        try {
+            await adminUpdateSport(token, editSportId, { slug: sportSlug.trim(), name: sportName.trim() });
+            closeAllEdits();
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error actualizando sport");
+        }
+    };
+
+    const onDeleteSport = async (sportId: string) => {
+        if (!token) return;
+        if (!confirm("¿Seguro que quieres borrar este sport y todo su contenido?")) return;
+
+        try {
+            await adminDeleteSport(token, sportId);
+            closeAllEdits();
+            setSelectedSportId("");
+            setSelectedCompetitionId("");
+            setSelectedSeasonId("");
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error borrando sport");
+        }
+    };
+
+    // -------------------------
+    // Actions: Competition
+    // -------------------------
+    const onCreateCompetition = async () => {
+        if (!token) return;
+        if (!selectedSportId) return;
+        if (!competitionSlug.trim() || !competitionName.trim()) return;
+
+        try {
+            await adminCreateCompetition(
+                token,
+                selectedSportId,
+                { es: competitionName.trim(), en: competitionName.trim(), slug: competitionSlug.trim() }
+            );
+            closeAllEdits();
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error creando competition");
+        }
+    };
+
+    const onStartEditCompetition = (sportId: string, competitionId: string) => {
+        closeAllEdits();
+        const c = findCompetition(sportId, competitionId);
+        if (!c) return;
+
+        setSelectedSportId(sportId);
+        setSelectedCompetitionId(competitionId);
+        setSelectedSeasonId("");
+
+        setEditCompetitionId(c.id);
+        setCompetitionSlug(c.slug);
+        setCompetitionName(c.name);
+        setCompetitionDefaultRuleId((c.defaultScoringRuleId ?? "") as string);
+    };
+
+    const onSaveEditCompetition = async () => {
+        if (!token || !selectedSportId || !editCompetitionId) return;
+
+        try {
+            await adminUpdateCompetition(token, editCompetitionId, {
+                es: competitionName.trim(),
+                en: competitionName.trim(),
+                slug: competitionSlug.trim(),
+            });
+
+            closeAllEdits();
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error actualizando competition");
+        }
+    };
+
+    const onDeleteCompetition = async (competitionId: string) => {
+        if (!token || !selectedSportId) return;
+        if (!confirm("¿Seguro que quieres borrar esta competencia y todas sus temporadas?")) return;
+
+        try {
+            await adminDeleteCompetition(token, competitionId);
+            closeAllEdits();
+            setSelectedCompetitionId("");
+            setSelectedSeasonId("");
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error borrando competition");
+        }
+    };
+
+    // -------------------------
+    // Actions: Season
+    // -------------------------
+    const onCreateSeason = async () => {
+        if (!token || !selectedSportId || !selectedCompetitionId) return;
+        if (!seasonSlug.trim() || !seasonName.trim()) return;
+
+        try {
+            await adminCreateSeason(
+                token,
+                selectedCompetitionId,
+                { es: seasonName.trim(), en: seasonName.trim(), slug: seasonSlug.trim() },
+                {
+                    startDate: seasonStartDate.trim() ? seasonStartDate.trim() : null,
+                    endDate: seasonEndDate.trim() ? seasonEndDate.trim() : null,
+                },
+                seasonDefaultRuleId.trim() ? seasonDefaultRuleId.trim() : undefined
+            );
+
+            closeAllEdits();
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error creando season");
+        }
+    };
+
+    const onStartEditSeason = (seasonId: string) => {
+        closeAllEdits();
+        if (!selectedSportId || !selectedCompetitionId) return;
+
+        const se = findSeason(selectedSportId, selectedCompetitionId, seasonId);
+        if (!se) return;
+
+        setEditSeasonId(se.id);
+        setSeasonSlug(se.slug);
+        setSeasonName(se.name);
+        setSeasonStartDate((se.startDate ?? "") as string);
+        setSeasonEndDate((se.endDate ?? "") as string);
+        setSeasonDefaultRuleId((se.defaultScoringRuleId ?? "") as string);
+
+        setSelectedSeasonId(se.id);
+    };
+
+    const onSaveEditSeason = async () => {
+        if (!token || !selectedSportId || !selectedCompetitionId || !editSeasonId) return;
+
+        try {
+            await adminUpdateSeason(
+                token,
+                editSeasonId,
+                { es: seasonName.trim(), en: seasonName.trim(), slug: seasonSlug.trim() },
+                {
+                    startDate: seasonStartDate.trim() ? seasonStartDate.trim() : null,
+                    endDate: seasonEndDate.trim() ? seasonEndDate.trim() : null,
+                },
+                seasonDefaultRuleId.trim() ? seasonDefaultRuleId.trim() : undefined
+            );
+
+            closeAllEdits();
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error actualizando season");
+        }
+    };
+
+    const onDeleteSeason = async (seasonId: string) => {
+        if (!token) return;
+        if (!confirm("¿Seguro que quieres borrar esta temporada?")) return;
+
+        try {
+            await adminDeleteSeason(token, seasonId);
+            closeAllEdits();
+            setSelectedSeasonId("");
+            await reloadCatalog();
+        } catch (e: unknown) {
+            alert(e instanceof Error ? e.message : "Error borrando season");
+        }
+    };
+
+    // -------------------------
+    // Derived
+    // -------------------------
+    const sport = useMemo(
+        () => catalog.find((s) => s.id === selectedSportId),
+        [catalog, selectedSportId]
+    );
+
+    const competition = useMemo(() => {
+        const s = catalog.find((x) => x.id === selectedSportId);
+        return s?.competitions?.find((c) => c.id === selectedCompetitionId);
+    }, [catalog, selectedSportId, selectedCompetitionId]);
+
+    const competitions = useMemo(() => sport?.competitions ?? [], [sport]);
+    const seasons = useMemo(() => competition?.seasons ?? [], [competition]);
+    const rulesSeasonId = useMemo(() => {
+        return (selectedSeasonId || seasons[0]?.id || "").trim();
+    }, [selectedSeasonId, seasons]);
+
+    useEffect(() => {
+        if (!token) return;
         reloadRules(rulesSeasonId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedCompetitionId, rulesSeasonId]);
+    }, [token, rulesSeasonId]);
 
-    // Reset competencia al cambiar deporte seleccionado
-    useEffect(() => {
-        closeAllEdits();
 
-        if (!selectedSportId) {
-            setSelectedCompetitionId(null);
-            return;
-        }
-        if (selectedCompetitionId && competitions.some((c) => c.id === selectedCompetitionId)) return;
-        setSelectedCompetitionId(null);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedSportId]);
-
-    // ---------------------------
-    // CRUD handlers (token required)
-    // ---------------------------
-    function getTokenOrFail(): string | null {
-        const token = localStorage.getItem("token");
-        if (!token) {
-            setError("No hay token. Inicia sesión de nuevo.");
-            router.replace(`/${locale}/login`);
-            return null;
-        }
-        return token;
+    // -------------------------
+    // Render
+    // -------------------------
+    if (!token) {
+        return (
+            <div className="p-6">
+                <div className="text-sm text-[var(--muted)]">Cargando token...</div>
+            </div>
+        );
     }
 
-    async function onCreateSport() {
-        const token = getTokenOrFail();
-        if (!token) return;
-
-        setError(null);
-        try {
-            const names: any = {};
-            if (newSportEs.trim()) names.es = newSportEs.trim();
-            if (newSportEn.trim()) names.en = newSportEn.trim();
-
-            if (!names.es && !names.en) {
-                setError("Debes indicar al menos un nombre (ES o EN).");
-                return;
-            }
-
-            await adminCreateSport(token, names);
-            setNewSportEs("");
-            setNewSportEn("");
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error creando deporte");
-        }
+    if (authError) {
+        return (
+            <div className="p-6 space-y-4">
+                <div className="text-red-400 text-sm">{authError}</div>
+                <Button variant="secondary" onClick={() => router.push(`/${locale}/dashboard`)}>
+                    Ir al dashboard
+                </Button>
+            </div>
+        );
     }
 
-    async function onStartEditSport(id: string) {
-        setEditSportId(id);
-        const n = getItemNames(namesBySportId, id);
-        setEditSportEs(n.es ?? "");
-        setEditSportEn(n.en ?? "");
+    if (!canAdmin) {
+        return (
+            <div className="p-6">
+                <div className="text-sm text-[var(--muted)]">Validando permisos...</div>
+            </div>
+        );
     }
 
-    async function onSaveEditSport() {
-        const token = getTokenOrFail();
-        if (!token || !editSportId) return;
-
-        setError(null);
-        try {
-            const names: any = {};
-            if (editSportEs.trim()) names.es = editSportEs.trim();
-            if (editSportEn.trim()) names.en = editSportEn.trim();
-
-            if (!names.es && !names.en) {
-                setError("Debes indicar al menos un nombre (ES o EN).");
-                return;
-            }
-
-            await adminUpdateSport(token, editSportId, names);
-            setEditSportId(null);
-            setEditSportEs("");
-            setEditSportEn("");
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error actualizando deporte");
-        }
-    }
-
-    async function onDeleteSport(id: string) {
-        const token = getTokenOrFail();
-        if (!token) return;
-
-        const ok = confirm("¿Seguro que deseas borrar este deporte? (Permitido por diseño)");
-        if (!ok) return;
-
-        setError(null);
-        try {
-            await adminDeleteSport(token, id);
-            if (selectedSportId === id) {
-                setSelectedSportId(null);
-                setSelectedCompetitionId(null);
-            }
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error borrando deporte");
-        }
-    }
-
-    async function onCreateCompetition() {
-        const token = getTokenOrFail();
-        if (!token) return;
-
-        if (!selectedSportId) {
-            setError("Selecciona un deporte primero.");
-            return;
-        }
-
-        setError(null);
-        try {
-            const names: any = {};
-            if (newCompEs.trim()) names.es = newCompEs.trim();
-            if (newCompEn.trim()) names.en = newCompEn.trim();
-
-            if (!names.es && !names.en) {
-                setError("Debes indicar al menos un nombre (ES o EN).");
-                return;
-            }
-
-            await adminCreateCompetition(token, selectedSportId, names);
-            setNewCompEs("");
-            setNewCompEn("");
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error creando competición");
-        }
-    }
-
-    async function onStartEditCompetition(id: string) {
-        setEditCompetitionId(id);
-        const n = getItemNames(namesByCompetitionId, id);
-        setEditCompEs(n.es ?? "");
-        setEditCompEn(n.en ?? "");
-    }
-
-    async function onSaveEditCompetition() {
-        const token = getTokenOrFail();
-        if (!token || !editCompetitionId) return;
-
-        setError(null);
-        try {
-            const names: any = {};
-            if (editCompEs.trim()) names.es = editCompEs.trim();
-            if (editCompEn.trim()) names.en = editCompEn.trim();
-
-            if (!names.es && !names.en) {
-                setError("Debes indicar al menos un nombre (ES o EN).");
-                return;
-            }
-
-            await adminUpdateCompetition(token, editCompetitionId, names);
-            setEditCompetitionId(null);
-            setEditCompEs("");
-            setEditCompEn("");
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error actualizando competición");
-        }
-    }
-
-    async function onDeleteCompetition(id: string) {
-        const token = getTokenOrFail();
-        if (!token) return;
-
-        const ok = confirm("¿Seguro que deseas borrar esta competición? (Permitido por diseño)");
-        if (!ok) return;
-
-        setError(null);
-        try {
-            await adminDeleteCompetition(token, id);
-            if (selectedCompetitionId === id) setSelectedCompetitionId(null);
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error borrando competición");
-        }
-    }
-
-    async function onCreateSeason() {
-        const token = getTokenOrFail();
-        if (!token) return;
-
-        if (!selectedCompetitionId) {
-            setError("Selecciona una competición primero.");
-            return;
-        }
-
-        setError(null);
-        try {
-            const names: any = {};
-            if (newSeasonEs.trim()) names.es = newSeasonEs.trim();
-            if (newSeasonEn.trim()) names.en = newSeasonEn.trim();
-
-            if (!names.es && !names.en) {
-                setError("Debes indicar al menos un nombre (ES o EN).");
-                return;
-            }
-
-            if (!newSeasonDefaultRuleId) {
-                setError("Debes seleccionar la regla estándar del evento (defaultScoringRuleId).");
-                return;
-            }
-
-            await adminCreateSeason(token, selectedCompetitionId, names, undefined, newSeasonDefaultRuleId);
-            setNewSeasonEs("");
-            setNewSeasonEn("");
-            setNewSeasonDefaultRuleId(ruleOptions.find((r) => r.id === "B01") ? "B01" : (ruleOptions[0]?.id ?? "B01"));
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error creando evento");
-        }
-    }
-
-    async function onStartEditSeason(id: string) {
-        setEditSeasonId(id);
-        const n = getItemNames(namesBySeasonId, id);
-        setEditSeasonEs(n.es ?? "");
-        setEditSeasonEn(n.en ?? "");
-        // Buscar el evento (season) dentro del catálogo ya cargado para leer su defaultScoringRuleId real
-        let found: any = null;
-        for (const s of sports) {
-            for (const c of (s.competitions ?? [])) {
-                const se = (c.seasons ?? []).find((x: any) => x.id === id);
-                if (se) { found = se; break; }
-            }
-            if (found) break;
-        }
-
-        const realDefault = (found?.defaultScoringRuleId ?? "").trim();
-        if (realDefault) {
-            setEditSeasonDefaultRuleId(realDefault);
-        } else {
-            // fallback seguro
-            setEditSeasonDefaultRuleId(ruleOptions.find((r) => r.id === "B01") ? "B01" : (ruleOptions[0]?.id ?? "B01"));
-        }
-    }
-
-    async function onSaveEditSeason() {
-        const token = getTokenOrFail();
-        if (!token || !editSeasonId) return;
-
-        setError(null);
-        try {
-            const names: any = {};
-            if (editSeasonEs.trim()) names.es = editSeasonEs.trim();
-            if (editSeasonEn.trim()) names.en = editSeasonEn.trim();
-
-            if (!names.es && !names.en) {
-                setError("Debes indicar al menos un nombre (ES o EN).");
-                return;
-            }
-
-            if (!editSeasonDefaultRuleId) {
-                setError("Debes seleccionar la regla estándar del evento (defaultScoringRuleId).");
-                return;
-            }
-
-            await adminUpdateSeason(token, editSeasonId, names, undefined, editSeasonDefaultRuleId);
-
-            setEditSeasonId(null);
-            setEditSeasonEs("");
-            setEditSeasonEn("");
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error actualizando evento");
-        }
-    }
-
-    async function onDeleteSeason(id: string) {
-        const token = getTokenOrFail();
-        if (!token) return;
-
-        const ok = confirm("¿Seguro que deseas borrar este evento? (Permitido por diseño)");
-        if (!ok) return;
-
-        setError(null);
-        try {
-            await adminDeleteSeason(token, id);
-            await reloadCatalog();
-        } catch (e: any) {
-            setError(e?.message ?? "Error borrando evento");
-        }
-    }
-
-    // ---------------------------
-    // UI
-    // ---------------------------
     return (
-        <div className="max-w-6xl mx-auto px-4 py-8">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                    <h1 className="text-xl font-semibold m-0">Admin · Catálogo</h1>
-                    <div className="mt-1 text-sm text-[var(--muted)]">
-                        Lectura desde API:{" "}
-                        <span className="font-mono text-[var(--foreground)]">/catalog?locale={locale}</span>
+        <div className="p-6 space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <div className="text-xl font-semibold">Admin · Catálogo</div>
+                    <div className="text-sm text-[var(--muted)]">
+                        {user?.displayName} <Badge className="ml-2">{user?.role}</Badge>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex gap-2">
                     <Button variant="secondary" size="sm" onClick={() => reloadCatalog()}>
                         Recargar
                     </Button>
-
                     <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/admin`)}>
                         Volver
                     </Button>
                 </div>
             </div>
 
-            {!user && !error && <p className="mt-4 text-sm text-[var(--muted)]">Cargando…</p>}
+            {(catalogError || rulesError) && (
+                <div className="rounded-xl border border-red-900/40 bg-red-950/30 p-3 text-sm text-red-200">
+                    {catalogError ?? rulesError}
+                </div>
+            )}
 
-            {error ? (
-                <Card className="mt-4 p-3">
-                    <div className="text-sm whitespace-pre-wrap">⚠️ {error}</div>
-                </Card>
-            ) : null}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Sports */}
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
+                    <div className="font-semibold">Sports</div>
 
-            {user && (
-                <div style={{ marginTop: 18 }}>
-                    {loadingCatalog ? (
-                        <div className="text-sm text-[var(--muted)]">Cargando catálogo…</div>
-                    ) : (
-                        <div className="grid gap-4 lg:grid-cols-3">
-                            {/* Deportes */}
-                            <Card className="p-4">
-                                <div className="flex items-center justify-between gap-2">
-                                    <div className="text-sm font-semibold">Deportes</div>
-                                    <Badge>{sports.length}</Badge>
-                                </div>
+                    <div className="space-y-2">
+                        <label className="text-xs text-[var(--muted)]">Seleccionar</label>
+                        <select
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={selectedSportId}
+                            onChange={(e) => {
+                                setSelectedSportId(e.target.value);
+                                setSelectedCompetitionId("");
+                                setSelectedSeasonId("");
+                                closeAllEdits();
+                            }}
+                            disabled={loadingCatalog}
+                        >
+                            <option value="">--</option>
+                            {catalog.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                    {s.name} ({s.slug})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
-                                {/* Create Sport */}
-                                <Card className="mt-3 p-3">
-                                    <div className="text-sm font-semibold mb-2">Crear deporte</div>
-                                    <div style={{ display: "grid", gap: 8 }}>
-                                        <input
-                                            value={newSportEs}
-                                            onChange={(e) => setNewSportEs(e.target.value)}
-                                            placeholder="Nombre ES (ejm: Fútbol)"
-                                            className={controlInput}
-                                        />
-                                        <input
-                                            value={newSportEn}
-                                            onChange={(e) => setNewSportEn(e.target.value)}
-                                            placeholder="Nombre EN (ejm: Football)"
-                                            className={controlInput}
-                                        />
-                                        <Button onClick={onCreateSport} variant="secondary" size="sm">
-                                            Crear
-                                        </Button>
-                                    </div>
-                                    <div className="mt-2 text-xs text-[var(--muted)]">Slug es automático en backend.</div>
-                                </Card>
+                    <div className="space-y-2">
+                        <label className="text-xs text-[var(--muted)]">Slug</label>
+                        <input
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={sportSlug}
+                            onChange={(e) => setSportSlug(e.target.value)}
+                            placeholder="futbol"
+                        />
+                        <label className="text-xs text-[var(--muted)]">Nombre</label>
+                        <input
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={sportName}
+                            onChange={(e) => setSportName(e.target.value)}
+                            placeholder="Fútbol"
+                        />
+                    </div>
 
-                                {/* Edit Sport */}
-                                {editSportId && (
-                                    <Card className="mt-3 p-3">
-                                        <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Editar deporte</div>
-                                        <div style={{ display: "grid", gap: 8 }}>
-                                            <input
-                                                value={editSportEs}
-                                                onChange={(e) => setEditSportEs(e.target.value)}
-                                                placeholder="Nombre ES"
-                                                className={controlInput}
-                                            />
-                                            <input
-                                                value={editSportEn}
-                                                onChange={(e) => setEditSportEn(e.target.value)}
-                                                placeholder="Nombre EN"
-                                                className={controlInput}
-                                            />
-                                            <div className="flex gap-2">
-                                                <Button size="sm" onClick={onSaveEditSport}>
-                                                    Guardar
-                                                </Button>
-
-                                                <Button
-                                                    size="sm"
-                                                    variant="secondary"
-                                                    onClick={() => {
-                                                        setEditSportId(null);
-                                                        setEditSportEs("");
-                                                        setEditSportEn("");
-                                                    }}
-                                                >
-                                                    Cancelar
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    </Card>
+                    <div className="flex gap-2">
+                        {!editSportId ? (
+                            <>
+                                <Button size="sm" onClick={() => onCreateSport()} disabled={loadingCatalog}>
+                                    Crear
+                                </Button>
+                                {selectedSportId && (
+                                    <Button size="sm" variant="secondary" onClick={() => onStartEditSport(selectedSportId)}>
+                                        Editar seleccionado
+                                    </Button>
                                 )}
-
-                                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                                    {sports.map((s) => {
-                                        const active = s.id === selectedSportId;
-                                        const names = getItemNames(namesBySportId, s.id);
-                                        return (
-                                            <div
-                                                key={s.id}
-                                                className={`rounded-xl border border-[var(--border)] bg-[var(--card)] ${active ? "ring-2 ring-[var(--accent)]" : ""}`}
-                                            >
-                                                <button
-                                                    onClick={() => {
-                                                        setSelectedSportId(s.id);
-                                                        // si cambias el sport, limpieza explícita de comp
-                                                        setSelectedCompetitionId(null);
-                                                    }}
-                                                    className={`w-full text-left px-3 py-2 rounded-xl hover:bg-[var(--muted)] ${active ? "bg-[var(--muted)]" : ""}`}
-                                                >
-                                                    <div style={{ fontWeight: 700 }}>{s.name}</div>
-                                                    <div style={{ fontSize: 12, opacity: 0.7 }}>
-                                                        {s.competitions?.length ?? 0} competición(es)
-                                                    </div>
-
-                                                    {(names.es || names.en) && (
-                                                        <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>
-                                                            <div>ES: {names.es ?? "—"}</div>
-                                                            <div>EN: {names.en ?? "—"}</div>
-                                                        </div>
-                                                    )}
-                                                </button>
-
-                                                <div style={{ display: "flex", gap: 8, marginTop: 10, padding: "0 12px 14px 12px" }}>
-                                                    <Button size="sm" variant="secondary" onClick={() => onStartEditSport(s.id)}>
-                                                        Editar
-                                                    </Button>
-                                                    <Button size="sm" variant="secondary" onClick={() => onDeleteSport(s.id)}>
-                                                        Borrar
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-
-                                    {!sports.length && <div style={{ opacity: 0.75 }}>Sin deportes.</div>}
-                                </div>
-                            </Card>
-
-                            {/* Competiciones */}
-                            <Card className="p-4">
-                                <div className="flex items-center justify-between gap-2">
-                                    <div className="text-sm font-semibold">Competiciones</div>
-                                    <Badge>{competitions.length}</Badge>
-                                </div>
-
-                                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
-                                    {selectedSportId ? (
-                                        <>Deporte seleccionado: <span style={{ opacity: 0.95 }}>{selectedSport?.name}</span></>
-                                    ) : (
-                                        <>Selecciona un deporte para gestionar competiciones.</>
-                                    )}
-                                </div>
-
-                                {/* Create Competition */}
-                                <Card className="mt-3 p-3">
-                                    <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Crear competición</div>
-                                    <div style={{ display: "grid", gap: 8 }}>
-                                        <input
-                                            value={newCompEs}
-                                            onChange={(e) => setNewCompEs(e.target.value)}
-                                            placeholder="Nombre ES (ejm: Copa Mundial FIFA)"
-                                            className={controlInput}
-                                            disabled={!selectedSportId}
-                                        />
-                                        <input
-                                            value={newCompEn}
-                                            onChange={(e) => setNewCompEn(e.target.value)}
-                                            placeholder="Nombre EN (ejm: FIFA World Cup)"
-                                            className={controlInput}
-                                            disabled={!selectedSportId}
-                                        />
-                                        <Button onClick={onCreateCompetition} variant="secondary" size="sm" disabled={!selectedSportId}>
-                                            Crear
-                                        </Button>
-                                    </div>
-                                    <div className="mt-2 text-xs text-[var(--muted)]">Slug es automático en backend.</div>
-                                </Card>
-
-                                {/* Edit Competition */}
-                                {editCompetitionId && (
-                                    <Card className="mt-3 p-3">
-                                        <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Editar competición</div>
-                                        <div style={{ display: "grid", gap: 8 }}>
-                                            <input
-                                                value={editCompEs}
-                                                onChange={(e) => setEditCompEs(e.target.value)}
-                                                placeholder="Nombre ES"
-                                                className={controlInput}
-                                            />
-                                            <input
-                                                value={editCompEn}
-                                                onChange={(e) => setEditCompEn(e.target.value)}
-                                                placeholder="Nombre EN"
-                                                className={controlInput}
-                                            />
-                                            <div className="flex gap-2">
-                                                <Button size="sm" onClick={onSaveEditCompetition}>
-                                                    Guardar
-                                                </Button>
-
-                                                <Button
-                                                    size="sm"
-                                                    variant="secondary"
-                                                    onClick={() => {
-                                                        setEditCompetitionId(null);
-                                                        setEditCompEs("");
-                                                        setEditCompEn("");
-                                                    }}
-                                                >
-                                                    Cancelar
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    </Card>
-                                )}
-
-                                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                                    {competitions.map((c) => {
-                                        const active = c.id === selectedCompetitionId;
-                                        const names = getItemNames(namesByCompetitionId, c.id);
-
-                                        return (
-                                            <div
-                                                key={c.id}
-                                                className={`rounded-xl border border-[var(--border)] bg-[var(--card)] ${active ? "ring-2 ring-[var(--accent)]" : ""}`}
-                                            >
-                                                <button
-                                                    onClick={() => setSelectedCompetitionId(c.id)}
-                                                    className={`w-full text-left px-3 py-2 rounded-xl hover:bg-[var(--muted)] ${active ? "bg-[var(--muted)]" : ""}`}
-                                                    disabled={!selectedSportId}
-                                                >
-                                                    <div style={{ fontWeight: 700 }}>{c.name}</div>
-                                                    <div style={{ fontSize: 12, opacity: 0.7 }}>
-                                                        {c.seasons?.length ?? 0} evento(s)
-                                                    </div>
-
-                                                    {(names.es || names.en) && (
-                                                        <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>
-                                                            <div>ES: {names.es ?? "—"}</div>
-                                                            <div>EN: {names.en ?? "—"}</div>
-                                                        </div>
-                                                    )}
-                                                </button>
-
-                                                <div style={{ display: "flex", gap: 8, marginTop: 10, padding: "0 12px 14px 12px" }}>
-                                                    <Button size="sm" variant="secondary" onClick={() => onStartEditCompetition(c.id)}>
-                                                        Editar
-                                                    </Button>
-                                                    <Button size="sm" variant="secondary" onClick={() => onDeleteCompetition(c.id)}>
-                                                        Borrar
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-
-                                    {!selectedSportId && <div style={{ opacity: 0.75 }}>Selecciona un deporte.</div>}
-                                    {selectedSportId && !competitions.length && <div style={{ opacity: 0.75 }}>Sin competiciones.</div>}
-                                </div>
-                            </Card>
-
-                            {/* Eventos (Season) */}
-                            <Card className="p-4">
-                                <div className="flex items-center justify-between gap-2">
-                                    <div className="text-sm font-semibold">Eventos</div>
-                                    <Badge>{seasons.length}</Badge>
-                                </div>
-
-                                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
-                                    {selectedCompetitionId ? (
-                                        <>Competición seleccionada: <span style={{ opacity: 0.95 }}>{selectedCompetition?.name}</span></>
-                                    ) : (
-                                        <>Selecciona una competición para gestionar eventos.</>
-                                    )}
-                                </div>
-
-                                {/* Create Season */}
-                                <Card className="mt-3 p-3">
-                                    <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Crear evento</div>
-                                    <div style={{ display: "grid", gap: 8 }}>
-                                        <input
-                                            value={newSeasonEs}
-                                            onChange={(e) => setNewSeasonEs(e.target.value)}
-                                            placeholder="Nombre ES (ejm: Mundial 2026)"
-                                            className={controlInput}
-                                            disabled={!selectedCompetitionId}
-                                        />
-                                        <input
-                                            value={newSeasonEn}
-                                            onChange={(e) => setNewSeasonEn(e.target.value)}
-                                            placeholder="Nombre EN (ejm: World Cup 2026)"
-                                            className={controlInput}
-                                            disabled={!selectedCompetitionId}
-                                        />
-                                        <select
-                                            value={newSeasonDefaultRuleId}
-                                            onChange={(e) => setNewSeasonDefaultRuleId(e.target.value)}
-                                            className={controlSelect}
-                                            disabled={!selectedCompetitionId || loadingRules}
-                                        >
-                                            {loadingRules ? (
-                                                <option value="">Cargando reglas...</option>
-                                            ) : (
-                                                <>
-                                                    {ruleOptions.map((r) => (
-                                                        <option key={r.id} value={r.id}>
-                                                            {r.id} — {r.name}
-                                                        </option>
-                                                    ))}
-                                                </>
-                                            )}
-                                        </select>
-                                        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.65 }}>
-                                            Regla estándar del evento (Ranking Mundial/País): <span style={{ opacity: 0.9 }}>{newSeasonDefaultRuleId || "—"}</span>
-                                        </div>
-                                        <Button onClick={onCreateSeason} variant="secondary" size="sm" disabled={!selectedCompetitionId}>
-                                            Crear
-                                        </Button>
-                                    </div>
-                                    <div className="mt-2 text-xs text-[var(--muted)]">Slug es automático en backend.</div>
-                                </Card>
-
-                                {/* Edit Season */}
-                                {editSeasonId && (
-                                    <Card className="mt-3 p-3">
-                                        <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Editar evento</div>
-                                        <div style={{ display: "grid", gap: 8 }}>
-                                            <input
-                                                value={editSeasonEs}
-                                                onChange={(e) => setEditSeasonEs(e.target.value)}
-                                                placeholder="Nombre ES"
-                                                className={controlInput}
-                                            />
-                                            <input
-                                                value={editSeasonEn}
-                                                onChange={(e) => setEditSeasonEn(e.target.value)}
-                                                placeholder="Nombre EN"
-                                                className={controlInput}
-                                            />
-                                            <select
-                                                value={editSeasonDefaultRuleId}
-                                                onChange={(e) => setEditSeasonDefaultRuleId(e.target.value)}
-                                                className={controlSelect}
-                                                disabled={loadingRules}
-                                            >
-                                                {loadingRules ? (
-                                                    <option value="">Cargando reglas...</option>
-                                                ) : (
-                                                    <>
-                                                        {ruleOptions.map((r) => (
-                                                            <option key={r.id} value={r.id}>
-                                                                {r.id} — {r.name}
-                                                            </option>
-                                                        ))}
-                                                    </>
-                                                )}
-                                            </select>
-                                            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.65 }}>
-                                                Regla estándar del evento (Ranking Mundial/País): <span style={{ opacity: 0.9 }}>{editSeasonDefaultRuleId || "—"}</span>
-                                            </div>
-                                            <div style={{ display: "flex", gap: 8 }}>
-                                                <Button size="sm" onClick={onSaveEditSeason}>
-                                                    Guardar
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    variant="secondary"
-                                                    onClick={() => {
-                                                        setEditSeasonId(null);
-                                                        setEditSeasonEs("");
-                                                        setEditSeasonEn("");
-                                                    }}
-                                                >
-                                                    Cancelar
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    </Card>
-                                )}
-
-                                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                                    {seasons.map((ev) => {
-                                        const names = getItemNames(namesBySeasonId, ev.id);
-
-                                        return (
-                                            <div key={ev.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)]">
-                                                <div className="px-3 py-2">
-                                                    <div style={{ fontWeight: 700 }}>{ev.name}</div>
-                                                    <div style={{ fontSize: 12, opacity: 0.7 }}>{ev.slug}</div>
-
-                                                    {(names.es || names.en) && (
-                                                        <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>
-                                                            <div>ES: {names.es ?? "—"}</div>
-                                                            <div>EN: {names.en ?? "—"}</div>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div style={{ display: "flex", gap: 8, marginTop: 10, padding: "0 12px 14px 12px" }}>
-                                                    <Button size="sm" variant="secondary" onClick={() => onStartEditSeason(ev.id)}>
-                                                        Editar
-                                                    </Button>
-                                                    <Button size="sm" variant="secondary" onClick={() => onDeleteSeason(ev.id)}>
-                                                        Borrar
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-
-                                    {!selectedCompetitionId && <div style={{ opacity: 0.75 }}>Selecciona una competición.</div>}
-                                    {selectedCompetitionId && !seasons.length && <div style={{ opacity: 0.75 }}>Sin eventos.</div>}
-                                </div>
-                            </Card>
-                        </div>
-                    )}
-
-                    <div style={{ marginTop: 14, fontSize: 12, opacity: 0.65 }}>
-                        Nota: Si intentas borrar un item con dependencias, el backend debería responder con error (integridad). Aquí lo mostramos tal cual.
+                            </>
+                        ) : (
+                            <>
+                                <Button size="sm" onClick={() => onSaveEditSport()} disabled={loadingCatalog}>
+                                    Guardar
+                                </Button>
+                                <Button variant="secondary" size="sm" onClick={() => closeAllEdits()}>
+                                    Cancelar
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => onDeleteSport(editSportId)}>
+                                    Borrar
+                                </Button>
+                            </>
+                        )}
                     </div>
                 </div>
-            )
-            }
-        </div >
+
+                {/* Competitions */}
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
+                    <div className="font-semibold">Competencias</div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs text-[var(--muted)]">Seleccionar</label>
+                        <select
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={selectedCompetitionId}
+                            onChange={(e) => {
+                                setSelectedCompetitionId(e.target.value);
+                                setSelectedSeasonId("");
+                                closeAllEdits();
+                            }}
+                            disabled={loadingCatalog || !selectedSportId}
+                        >
+                            <option value="">--</option>
+                            {competitions.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                    {c.name} ({c.slug})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs text-[var(--muted)]">Slug</label>
+                        <input
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={competitionSlug}
+                            onChange={(e) => setCompetitionSlug(e.target.value)}
+                            placeholder="mundial-2026"
+                            disabled={!selectedSportId}
+                        />
+                        <label className="text-xs text-[var(--muted)]">Nombre</label>
+                        <input
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={competitionName}
+                            onChange={(e) => setCompetitionName(e.target.value)}
+                            placeholder="Mundial 2026"
+                            disabled={!selectedSportId}
+                        />
+
+                        <label className="text-xs text-[var(--muted)]">Default scoring rule</label>
+                        <select
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={competitionDefaultRuleId}
+                            onChange={(e) => setCompetitionDefaultRuleId(e.target.value)}
+                            disabled={!selectedSportId || loadingRules}
+                        >
+                            <option value="">(sin default)</option>
+                            {rules.map((r) => (
+                                <option key={r.id} value={r.id}>
+                                    {r.code} · {r.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="flex gap-2">
+                        {!editCompetitionId ? (
+                            <>
+                                <Button size="sm" onClick={() => onCreateCompetition()} disabled={!selectedSportId || loadingCatalog}>
+                                    Crear
+                                </Button>
+                                {selectedSportId && selectedCompetitionId && (
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() => onStartEditCompetition(selectedSportId, selectedCompetitionId)}
+                                        disabled={loadingCatalog}
+                                    >
+                                        Editar seleccionada
+                                    </Button>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Button size="sm" onClick={() => onSaveEditCompetition()} disabled={loadingCatalog}>
+                                    Guardar
+                                </Button>
+                                <Button variant="secondary" size="sm" onClick={() => closeAllEdits()}>
+                                    Cancelar
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => onDeleteCompetition(editCompetitionId)}>
+                                    Borrar
+                                </Button>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                {/* Seasons */}
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
+                    <div className="font-semibold">Temporadas</div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs text-[var(--muted)]">Seleccionar</label>
+                        <select
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={selectedSeasonId}
+                            onChange={(e) => {
+                                setSelectedSeasonId(e.target.value);
+                                closeAllEdits();
+                            }}
+                            disabled={loadingCatalog || !selectedSportId || !selectedCompetitionId}
+                        >
+                            <option value="">--</option>
+                            {seasons.map((se) => (
+                                <option key={se.id} value={se.id}>
+                                    {se.name} ({se.slug})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs text-[var(--muted)]">Slug</label>
+                        <input
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={seasonSlug}
+                            onChange={(e) => setSeasonSlug(e.target.value)}
+                            placeholder="2026"
+                            disabled={!selectedSportId || !selectedCompetitionId}
+                        />
+                        <label className="text-xs text-[var(--muted)]">Nombre</label>
+                        <input
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={seasonName}
+                            onChange={(e) => setSeasonName(e.target.value)}
+                            placeholder="Temporada 2026"
+                            disabled={!selectedSportId || !selectedCompetitionId}
+                        />
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className="text-xs text-[var(--muted)]">Start</label>
+                                <input
+                                    className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                                    value={seasonStartDate}
+                                    onChange={(e) => setSeasonStartDate(e.target.value)}
+                                    placeholder="2026-01-01"
+                                    disabled={!selectedSportId || !selectedCompetitionId}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-[var(--muted)]">End</label>
+                                <input
+                                    className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                                    value={seasonEndDate}
+                                    onChange={(e) => setSeasonEndDate(e.target.value)}
+                                    placeholder="2026-12-31"
+                                    disabled={!selectedSportId || !selectedCompetitionId}
+                                />
+                            </div>
+                        </div>
+
+                        <label className="text-xs text-[var(--muted)]">Default scoring rule</label>
+                        <select
+                            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-2 text-sm"
+                            value={seasonDefaultRuleId}
+                            onChange={(e) => setSeasonDefaultRuleId(e.target.value)}
+                            disabled={!selectedSportId || !selectedCompetitionId || loadingRules}
+                        >
+                            <option value="">(sin default)</option>
+                            {rules.map((r) => (
+                                <option key={r.id} value={r.id}>
+                                    {r.code} · {r.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="flex gap-2">
+                        {!editSeasonId ? (
+                            <>
+                                <Button
+                                    size="sm"
+                                    onClick={() => onCreateSeason()}
+                                    disabled={!selectedSportId || !selectedCompetitionId || loadingCatalog}
+                                >
+                                    Crear
+                                </Button>
+                                {selectedSeasonId && (
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() => onStartEditSeason(selectedSeasonId)}
+                                        disabled={loadingCatalog}
+                                    >
+                                        Editar seleccionada
+                                    </Button>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Button size="sm" onClick={() => onSaveEditSeason()} disabled={loadingCatalog}>
+                                    Guardar
+                                </Button>
+                                <Button variant="secondary" size="sm" onClick={() => closeAllEdits()}>
+                                    Cancelar
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => onDeleteSeason(editSeasonId)}>
+                                    Borrar
+                                </Button>
+                            </>
+                        )}
+                    </div>
+
+                    {/* listado actual */}
+                    {seasons.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                            <div className="text-xs text-[var(--muted)]">Listado</div>
+                            <div className="space-y-2">
+                                {seasons.map((se) => (
+                                    <button
+                                        key={se.id}
+                                        className="w-full text-left rounded-xl border border-[var(--border)] bg-[var(--muted)]/30 p-3 hover:bg-[var(--muted)]/40 transition"
+                                        onClick={() => {
+                                            closeAllEdits();
+                                            onStartEditSeason(se.id);
+                                        }}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div className="font-medium">{se.name}</div>
+                                            {!!se.defaultScoringRuleId && (
+                                                <Badge className="text-xs">
+                                                    rule: {se.defaultScoringRuleId}
+                                                </Badge>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-[var(--muted)] font-mono">{se.id}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="text-xs text-[var(--muted)]">
+                {loadingCatalog ? "Cargando catálogo..." : "OK"}
+                {loadingRules ? " · Cargando reglas..." : ""}
+            </div>
+        </div>
     );
 }

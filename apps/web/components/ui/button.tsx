@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-type Variant = "primary" | "secondary" | "outline" | "ghost";
+type Variant = "primary" | "secondary" | "outline" | "ghost" | "destructive";
 type Size = "sm" | "md";
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -24,14 +24,16 @@ const sizes: Record<Size, string> = {
 };
 
 const variants: Record<Variant, string> = {
-  primary:
-    "bg-[var(--accent)] text-[var(--accent-foreground)] hover:opacity-90",
+  primary: "bg-[var(--accent)] text-[var(--accent-foreground)] hover:opacity-90",
   secondary:
     "bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] hover:opacity-90",
   outline:
     "bg-transparent text-[var(--foreground)] border border-[var(--border)] hover:opacity-90",
-  ghost:
-    "bg-transparent text-[var(--foreground)] hover:opacity-90",
+  ghost: "bg-transparent text-[var(--foreground)] hover:opacity-90",
+
+  // ✅ Nuevo: destructive
+  destructive:
+    "bg-red-600 text-white hover:bg-red-700 border border-red-700/40",
 };
 
 export function Button({

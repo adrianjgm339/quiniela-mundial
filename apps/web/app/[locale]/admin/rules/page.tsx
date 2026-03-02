@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
@@ -40,6 +40,27 @@ const DEFAULT_CODES: Array<{ code: string; label: string }> = [
 
 const SYSTEM_RULE_IDS = new Set(["B01", "R01", "R02", "R03", "R04", "R05", 'BB01', 'BB02', 'BB03']);
 
+type AnyRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is AnyRecord {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function getString(obj: AnyRecord, key: string): string | undefined {
+  const v = obj[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (isRecord(e)) {
+    const m = getString(e, "message");
+    if (m) return m;
+  }
+  return "Error";
+}
+
+
 function inferSportCompetitionFromSeason(catalog: CatalogSport[], seasonId: string) {
   for (const s of catalog ?? []) {
     for (const c of s.competitions ?? []) {
@@ -71,8 +92,6 @@ export default function AdminRulesPage() {
   const [rules, setRules] = useState<ApiScoringRule[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
 
-  const [user, setUser] = useState<any | null>(null);
-
   // Contexto (Deporte → Competición → Evento → Liga)
   const [catalog, setCatalog] = useState<CatalogSport[]>([]);
   const [sportId, setSportId] = useState<string>("");
@@ -101,16 +120,16 @@ export default function AdminRulesPage() {
 
   const selected = useMemo(() => rules.find((r) => r.id === selectedId) ?? null, [rules, selectedId]);
 
-  function getTokenOrRedirect() {
+  const getTokenOrRedirect = useCallback(() => {
     const token = localStorage.getItem("token");
     if (!token) {
       router.replace(`/${locale}/login`);
       return null;
     }
     return token;
-  }
+  }, [router, locale]);
 
-  async function loadAll(nextSeasonId?: string) {
+  const loadAll = useCallback(async (nextSeasonId?: string) => {
     const token = getTokenOrRedirect();
     if (!token) return;
 
@@ -120,8 +139,6 @@ export default function AdminRulesPage() {
     try {
       // 1) Me (validar admin + fallback de activeSeasonId)
       const u = await me(token, locale);
-      setUser(u);
-
       if (u?.role !== "ADMIN") {
         router.replace(`/${locale}/dashboard`);
         return;
@@ -169,10 +186,16 @@ export default function AdminRulesPage() {
         try {
           const conceptRows = await getSeasonConcepts(token, sid);
 
-          const nextConcepts =
-            (conceptRows ?? [])
-              .filter((x: any) => x?.code)
-              .map((x: any) => ({ code: x.code, label: (x.label ?? x.code) as string }));
+          const rows = Array.isArray(conceptRows) ? conceptRows : [];
+          const nextConcepts = rows
+            .map((x) => {
+              if (!isRecord(x)) return null;
+              const code = getString(x, "code");
+              const label = getString(x, "label");
+              if (!code) return null;
+              return { code, label: label && label.length ? label : code };
+            })
+            .filter((x): x is { code: string; label: string } => x !== null);
 
           setConcepts(nextConcepts.length ? nextConcepts : DEFAULT_CODES);
         } catch {
@@ -200,36 +223,36 @@ export default function AdminRulesPage() {
       setRules(list);
 
       setSelectedId(list[0]?.id ?? "");
-    } catch (e: any) {
-      setError(e?.message ?? "Error");
+    } catch (e: unknown) {
+      setError(errorMessage(e) || "Error");
     } finally {
       setLoading(false);
     }
-  }
+  }, [getTokenOrRedirect, locale, router]);
 
   useEffect(() => {
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+    void loadAll();
+  }, [loadAll]);
+
+  const loadSelectedRule = useCallback(async () => {
+    const token = getTokenOrRedirect();
+    if (!token) return;
+    if (!selectedId) return;
+
+    setMsg(null);
+    setError(null);
+
+    try {
+      const r = await getScoringRule(token, selectedId);
+      setEditing(r);
+    } catch (e: unknown) {
+      setError(errorMessage(e) || "Error");
+    }
+  }, [getTokenOrRedirect, selectedId]);
 
   useEffect(() => {
-    (async () => {
-      const token = getTokenOrRedirect();
-      if (!token) return;
-      if (!selectedId) return;
-
-      setMsg(null);
-      setError(null);
-
-      try {
-        const r = await getScoringRule(token, selectedId);
-        setEditing(r);
-      } catch (e: any) {
-        setError(e?.message ?? "Error");
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  void loadSelectedRule();
+}, [loadSelectedRule]);
 
   function setDetail(code: string, points: number) {
     setEditing((prev) => {
@@ -272,8 +295,8 @@ export default function AdminRulesPage() {
 
       setMsg("✅ Regla guardada.");
       await loadAll();
-    } catch (e: any) {
-      setError(e?.message ?? "Error guardando");
+    } catch (e: unknown) {
+      setError(errorMessage(e) || "Error guardando");
     } finally {
       setSaving(false);
     }
@@ -292,8 +315,8 @@ export default function AdminRulesPage() {
       setMsg(
         `✅ Recalculo listo. Matches confirmados: ${res.confirmedMatchesWithScore} · Picks procesados: ${res.picksProcessed}`,
       );
-    } catch (e: any) {
-      setError(e?.message ?? "Error recalculando");
+    } catch (e: unknown) {
+      setError(errorMessage(e) || "Error recalculando");
     } finally {
       setSaving(false);
     }
@@ -335,8 +358,8 @@ export default function AdminRulesPage() {
       setMsg("✅ Regla creada.");
       await loadAll();
       setSelectedId(id);
-    } catch (e: any) {
-      setError(e?.message ?? "Error creando");
+    } catch (e: unknown) {
+      setError(errorMessage(e) || "Error creando");
     } finally {
       setCreating(false);
     }

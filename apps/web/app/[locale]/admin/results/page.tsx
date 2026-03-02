@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { TeamWithFlag } from "@/components/team-with-flag";
@@ -102,7 +102,19 @@ function formatLocalDateTime(locale: string, iso?: string | null) {
   }
 }
 
-function safeStr(x: any) {
+// ---- Strict typing helpers (lint-clean) ----
+type AnyRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is AnyRecord {
+  return typeof v === 'object' && v !== null;
+}
+
+function getField<T extends string>(obj: unknown, key: T): unknown {
+  if (!isRecord(obj)) return undefined;
+  return obj[key];
+}
+
+function safeStr(x: unknown) {
   return (x ?? '')
     .toString()
     .replace(/°/g, 'º')   // 👈 clave: 2° -> 2º
@@ -110,26 +122,62 @@ function safeStr(x: any) {
     .trim();
 }
 
-function teamDisplayName(team: any, locale: string) {
+type TeamTranslation = { locale?: string | null; name?: string | null };
+type TeamNameLike = {
+  name?: string | null;
+  displayName?: string | null;
+  shortName?: string | null;
+  code?: string | null;
+  slug?: string | null;
+  translations?: TeamTranslation[] | null;
+};
 
+function teamDisplayName(team: unknown, locale: string) {
   if (!team) return '';
 
-  const tr =
-    team.translations?.find((t: any) => t?.locale === locale) ??
-    team.translations?.find((t: any) => (t?.locale ?? '').startsWith(locale)) ??
-    team.translations?.[0];
+  const translations = getField(team, 'translations');
+  const arr = Array.isArray(translations) ? (translations as unknown[]) : [];
 
+  const exact = arr.find((t) => {
+    const loc = safeStr(getField(t, 'locale'));
+    return loc === locale;
+  });
+  const prefix = arr.find((t) => {
+    const loc = safeStr(getField(t, 'locale'));
+    return loc.startsWith(locale);
+  });
+  const first = arr[0];
+
+  const trName = safeStr(getField(exact ?? prefix ?? first, 'name'));
+
+  const t = team as TeamNameLike;
   return (
-    tr?.name ??
-    team.name ??
-    team.displayName ??
-    team.shortName ??
-    team.code ??
-    team.slug ??
+    trName ||
+    safeStr(t.name) ||
+    safeStr(t.displayName) ||
+    safeStr(t.shortName) ||
+    safeStr(t.code) ||
+    safeStr(t.slug) ||
     ''
   );
 }
 
+function errorMessage(e: unknown, fallback: string) {
+  if (e instanceof Error) return e.message || fallback;
+  const msg = safeStr(getField(e, 'message'));
+  return msg || fallback;
+}
+
+type AdvanceMethod = '' | 'ET' | 'PEN';
+function toAdvanceMethod(v: unknown): AdvanceMethod {
+  const s = safeStr(v);
+  return s === 'ET' || s === 'PEN' ? (s as AdvanceMethod) : '';
+}
+
+type ResetMode = '' | 'future' | 'full' | 'groups' | 'all';
+function toResetMode(v: string): ResetMode {
+  return v === '' || v === 'future' || v === 'full' || v === 'groups' || v === 'all' ? (v as ResetMode) : '';
+}
 export default function AdminResultsPage() {
   const router = useRouter();
   const { locale } = useParams<{ locale: string }>();
@@ -387,7 +435,7 @@ export default function AdminResultsPage() {
         resultConfirmed: confirmed,
 
         advanceTeamId: (m.advanceTeamId ?? '') || '',
-        advanceMethod: (m.advanceMethod ?? '') as any,
+        advanceMethod: toAdvanceMethod(m.advanceMethod),
       };
     }
 
@@ -444,7 +492,18 @@ export default function AdminResultsPage() {
     return res.json();
   }
 
-  async function resetKo(token: string, seasonId: string, mode: 'future' | 'full' | 'groups' | 'all') {
+  type ResetKoResponse = {
+    resetPhases?: string[];
+    restoredFuturePlaceholders?: number;
+    skippedBadExternalId?: number;
+    skippedMissingTeams?: number;
+  };
+
+  async function resetKo(
+    token: string,
+    seasonId: string,
+    mode: Exclude<ResetMode, ''>,
+  ): Promise<ResetKoResponse> {
     const qs = new URLSearchParams();
     qs.set('seasonId', seasonId);
     qs.set('mode', mode);
@@ -457,65 +516,64 @@ export default function AdminResultsPage() {
     if (!res.ok) {
       const txt = await res.text();
       try {
-        const j = JSON.parse(txt);
-        throw new Error(j?.message || 'Error reseteando KO');
+        const j: unknown = JSON.parse(txt);
+        throw new Error(safeStr(getField(j, 'message')) || 'Error reseteando KO');
       } catch {
         throw new Error(txt || 'Error reseteando KO');
       }
     }
-    return res.json();
+
+    const raw: unknown = await res.json();
+
+    const resetPhasesRaw = getField(raw, 'resetPhases');
+    const resetPhases =
+      Array.isArray(resetPhasesRaw) ? resetPhasesRaw.map((x) => safeStr(x)).filter(Boolean) : undefined;
+
+    const restoredFuturePlaceholders = Number(getField(raw, 'restoredFuturePlaceholders'));
+    const skippedBadExternalId = Number(getField(raw, 'skippedBadExternalId'));
+    const skippedMissingTeams = Number(getField(raw, 'skippedMissingTeams'));
+
+    return {
+      resetPhases,
+      restoredFuturePlaceholders: Number.isFinite(restoredFuturePlaceholders) ? restoredFuturePlaceholders : undefined,
+      skippedBadExternalId: Number.isFinite(skippedBadExternalId) ? skippedBadExternalId : undefined,
+      skippedMissingTeams: Number.isFinite(skippedMissingTeams) ? skippedMissingTeams : undefined,
+    };
   }
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     const token = getTokenOrRedirect();
     if (!token) return;
-
-    (async () => {
+    void (async () => {
       try {
         setLoading(true);
         setError(null);
-
         const me = await fetchMe(token);
-
         // Solo ADMIN
         if (me.role !== 'ADMIN') {
           router.push(`/${locale}/dashboard`);
           return;
         }
-
         const lsGlobalSeasonId = localStorage.getItem('activeSeasonId') ?? '';
         const lsAdminSeasonId = localStorage.getItem('admin_ctx_seasonId') ?? '';
-
         // Prioridad:
         // 1) contexto global (Catálogo) guardado en localStorage
         // 2) backend (/auth/me activeSeasonId)
         // 3) fallback: último evento usado en esta pantalla (admin_ctx)
         const sid = lsGlobalSeasonId || (me.activeSeasonId ?? '') || lsAdminSeasonId;
-
         setActiveSeasonId(sid);
-
         // Si el contexto global cambió, sincronizamos el admin_ctx para evitar "arrastrar" béisbol/fútbol viejos.
         if (sid && sid !== lsAdminSeasonId) {
           localStorage.setItem('admin_ctx_seasonId', sid);
         }
-
-        // Fallback label (luego lo refinamos con catálogo)
-        const fallbackLabel =
-          me.activeSeason?.name?.trim() ||
-          (me.activeSeason?.year ? `Mundial ${me.activeSeason.year}` : '') ||
-          '';
-
         const label =
           me.activeSeason?.name?.trim() ||
           (me.activeSeason?.year ? `Mundial ${me.activeSeason.year}` : '') ||
           '';
-
         setActiveSeasonLabel(label);
-
         // 1) Cargar catálogo para armar cascada Sport/Competition/Season
         const cat = await fetchCatalog(locale);
         setCatalog(cat);
-
         if (sid) {
           // Label exacto desde catálogo por seasonId
           let seasonName = '';
@@ -531,7 +589,6 @@ export default function AdminResultsPage() {
           }
           if (seasonName) setActiveSeasonLabel(seasonName);
         }
-
         // 2) Inicializar selects en base al evento activo (sid)
         if (sid) {
           const inferred = inferSportCompetitionFromSeason(cat, sid);
@@ -543,21 +600,20 @@ export default function AdminResultsPage() {
           setCompetitionId('');
           setSeasonId('');
         }
-
         await fetchMatches(token, sid || undefined);
-
         if (sid) {
           await fetchBracketSlots(token, sid);
         }
-
-      } catch (e: any) {
-        setError(e?.message ?? 'Error cargando datos');
+      } catch (e: unknown) {
+        setError(errorMessage(e, 'Error cargando datos'));
       } finally {
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+  }, [locale, router]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   async function onSaveMatch(matchId: string) {
     const token = getTokenOrRedirect();
@@ -595,8 +651,8 @@ export default function AdminResultsPage() {
     const match = matches.find((x) => x.id === matchId);
     const isKO = (match?.phaseCode ?? '') !== 'F01';
     // IDs reales para validar avance en KO (fallback por si homeTeamId/awayTeamId vienen vacíos)
-    const koHomeId = safeStr(match?.homeTeamId) || safeStr((match as any)?.homeTeam?.id);
-    const koAwayId = safeStr(match?.awayTeamId) || safeStr((match as any)?.awayTeam?.id);
+    const koHomeId = safeStr(match?.homeTeamId) || safeStr(match?.homeTeam?.id);
+    const koAwayId = safeStr(match?.awayTeamId) || safeStr(match?.awayTeam?.id);
 
     if (isKO) {
       const bi = getPrevPhaseBlockInfo(match?.phaseCode);
@@ -646,8 +702,8 @@ export default function AdminResultsPage() {
 
       // refresca lista
       await fetchMatches(token, activeSeasonId || undefined);
-    } catch (e: any) {
-      setError(e?.message ?? 'Error guardando resultado');
+    } catch (e: unknown) {
+      setError(errorMessage(e, 'Error guardando resultado'));
     } finally {
       setSavingId(null);
     }
@@ -670,8 +726,8 @@ export default function AdminResultsPage() {
 
       // opcional: refrescar lista por si cambió algo
       await fetchMatches(token, activeSeasonId || undefined);
-    } catch (e: any) {
-      setError(e?.message ?? 'Error en recompute');
+    } catch (e: unknown) {
+      setError(errorMessage(e, 'Error en recompute'));
     } finally {
       setRecomputing(false);
     }
@@ -719,13 +775,13 @@ export default function AdminResultsPage() {
           : `Placeholders KO restaurados: ${r?.restoredFuturePlaceholders ?? 0}.`;
 
       setResetMsg(
-        `✅ Reset completado · ${resetMode} · placeholders restaurados: ${r?.restoredFuturePlaceholders ?? '—'} (saltados: ${(r as any)?.skippedBadExternalId ?? 0} ext inválidos, ${(r as any)?.skippedMissingTeams ?? 0} teams faltantes)`,
+        `✅ Reset completado · ${resetMode} · placeholders restaurados: ${r?.restoredFuturePlaceholders ?? '—'} (saltados: ${r?.skippedBadExternalId ?? 0} ext inválidos, ${r?.skippedMissingTeams ?? 0} teams faltantes)`,
       );
 
       // refresca lista (y borra draft/estado se recalcula en fetchMatches)
       await fetchMatches(token, activeSeasonId || undefined);
-    } catch (e: any) {
-      setError(e?.message ?? 'Error reseteando KO');
+    } catch (e: unknown) {
+      setError(errorMessage(e, 'Error reseteando KO'));
     } finally {
       setResetting(false);
     }
@@ -769,7 +825,7 @@ export default function AdminResultsPage() {
           <div className="flex items-center gap-2">
             <select
               value={resetMode}
-              onChange={(e) => setResetMode(e.target.value as any)}
+              onChange={(e) => setResetMode(toResetMode(e.target.value))}
               disabled={resetting}
               className={controlClickable}
               title="Reset KO (QA)"
@@ -947,8 +1003,8 @@ export default function AdminResultsPage() {
 
                 await fetchMatches(token, nextSeasonId || undefined);
                 if (nextSeasonId) await fetchBracketSlots(token, nextSeasonId);
-              } catch (err: any) {
-                setError(err?.message ?? 'Error cambiando evento');
+              } catch (err: unknown) {
+                setError(errorMessage(err, 'Error cambiando evento'));
               } finally {
                 setLoading(false);
               }
@@ -1122,7 +1178,7 @@ export default function AdminResultsPage() {
             awayScore: m.score?.away != null ? String(m.score.away) : '',
             resultConfirmed: !!m.resultConfirmed,
             advanceTeamId: m.advanceTeamId ?? '',
-            advanceMethod: (m.advanceMethod ?? '') as any,
+            advanceMethod: toAdvanceMethod(m.advanceMethod),
           };
 
 
@@ -1340,7 +1396,7 @@ export default function AdminResultsPage() {
                         onChange={(e) =>
                           setDraft((prev) => ({
                             ...prev,
-                            [m.id]: { ...d, advanceMethod: e.target.value as any },
+                            [m.id]: { ...d, advanceMethod: toAdvanceMethod(e.target.value) },
                           }))
                         }
                         className={controlClickable}
