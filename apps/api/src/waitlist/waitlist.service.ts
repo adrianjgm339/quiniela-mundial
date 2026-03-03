@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWaitlistDto, WaitlistInterestDto } from './dto/create-waitlist.dto';
 
 @Injectable()
 export class WaitlistService {
+    private readonly logger = new Logger(WaitlistService.name);
+
     constructor(private readonly prisma: PrismaService) { }
 
     async create(dto: CreateWaitlistDto) {
@@ -45,7 +47,15 @@ export class WaitlistService {
             });
 
             return { ok: true, ...created };
-        } catch {
+        } catch (err: unknown) {
+            const e = err as any;
+
+            // Log útil para Vercel (sin romper la respuesta al cliente)
+            this.logger.error(
+                `Waitlist upsert failed (email=${email}, code=${e?.code ?? 'n/a'})`,
+                e?.stack ?? JSON.stringify(e),
+            );
+
             throw new BadRequestException('No se pudo registrar en la waitlist.');
         }
     }
