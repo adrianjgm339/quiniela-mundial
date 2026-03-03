@@ -53,7 +53,14 @@ export function WaitlistForm(props: { locale: string; source?: string }) {
     track('waitlist_submit', { locale, source, interest });
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/waitlist`, {
+      const rawApiBase =
+        process.env.NEXT_PUBLIC_API_BASE ??
+        process.env.NEXT_PUBLIC_API_URL ??
+        'http://localhost:3001';
+
+      const apiBase = rawApiBase.replace(/\/+$/, '');
+
+      const res = await fetch(`${apiBase}/waitlist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
