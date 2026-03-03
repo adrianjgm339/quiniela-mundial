@@ -6,6 +6,30 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { googleLogin as apiGoogleLogin, login as apiLogin } from "@/lib/api";
 
+// ---------------------------
+// Tipos mínimos (estables) para Google Identity Services (GSI)
+// Evitan @ts-ignore y any, y no dependen de librerías extra.
+// ---------------------------
+type GoogleCredentialResponse = {
+  credential?: string;
+  select_by?: string;
+};
+
+type GoogleIdApi = {
+  initialize: (opts: { client_id: string; callback: (resp: GoogleCredentialResponse) => void }) => void;
+  prompt: (cb?: (notification: unknown) => void) => void;
+};
+
+declare global {
+  interface Window {
+    google?: {
+      accounts?: {
+        id?: GoogleIdApi;
+      };
+    };
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const params = useParams<{ locale: string }>();
@@ -65,21 +89,22 @@ export default function LoginPage() {
   function onGoogleClick() {
     setError(null);
 
-    // @ts-ignore
-    const g = (window as any).google;
-    if (!g?.accounts?.id) {
+    const g = window.google;
+    const idApi = g?.accounts?.id;
+
+    if (!idApi) {
       setError("Google no está listo todavía.");
       return;
     }
 
-    g.accounts.id.initialize({
+    idApi.initialize({
       client_id: googleClientId,
-      callback: (resp: any) => {
-        if (resp?.credential) onGoogleCredential(resp.credential);
+      callback: (resp: GoogleCredentialResponse) => {
+        if (resp.credential) onGoogleCredential(resp.credential);
       },
     });
 
-    g.accounts.id.prompt((notification: any) => {
+    idApi.prompt((notification: unknown) => {
       // Debug: por qué no muestra el prompt (si ocurre)
       // Verás razones como: "browser_not_supported", "suppressed_by_user", etc.
       console.log("[GSI prompt notification]", notification);

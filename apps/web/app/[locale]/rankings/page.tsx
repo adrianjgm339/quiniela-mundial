@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   getLeagueLeaderboard,
@@ -18,6 +18,16 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
 
 type Tab = 'LEAGUE' | 'WORLD' | 'COUNTRY';
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getErrorMessage(raw: unknown): string {
+  if (raw instanceof Error) return raw.message;
+  if (isRecord(raw) && typeof raw.message === 'string') return raw.message;
+  return String(raw ?? '');
+}
 
 function RowTable({
   title,
@@ -51,9 +61,9 @@ function RowTable({
                   style={
                     isMe
                       ? {
-                        background: 'color-mix(in srgb, var(--primary) 10%, transparent)',
-                        boxShadow: 'inset 3px 0 0 0 var(--primary)',
-                      }
+                          background: 'color-mix(in srgb, var(--primary) 10%, transparent)',
+                          boxShadow: 'inset 3px 0 0 0 var(--primary)',
+                        }
                       : undefined
                   }
                 >
@@ -103,25 +113,31 @@ export default function RankingsPage() {
   const qsLeagueId = searchParams.get('leagueId') || '';
   const qsSeasonId = searchParams.get('seasonId') || '';
 
-  function isSameQuery(next: { scope?: string; leagueId?: string; seasonId?: string }) {
-    const scope = (next.scope || '').toLowerCase();
-    const leagueId = next.leagueId || '';
-    const seasonId = next.seasonId || '';
+  const isSameQuery = useCallback(
+    (next: { scope?: string; leagueId?: string; seasonId?: string }) => {
+      const scope = (next.scope || '').toLowerCase();
+      const leagueId = next.leagueId || '';
+      const seasonId = next.seasonId || '';
 
-    return (qsScope || '') === scope && (qsLeagueId || '') === leagueId && (qsSeasonId || '') === seasonId;
-  }
+      return (qsScope || '') === scope && (qsLeagueId || '') === leagueId && (qsSeasonId || '') === seasonId;
+    },
+    [qsLeagueId, qsScope, qsSeasonId],
+  );
 
-  function pushRankingsQuery(next: { scope?: string; leagueId?: string; seasonId?: string }) {
-    if (isSameQuery(next)) return;
+  const pushRankingsQuery = useCallback(
+    (next: { scope?: string; leagueId?: string; seasonId?: string }) => {
+      if (isSameQuery(next)) return;
 
-    const params = new URLSearchParams();
-    if (next.scope) params.set('scope', next.scope);
-    if (next.leagueId) params.set('leagueId', next.leagueId);
-    if (next.seasonId) params.set('seasonId', next.seasonId);
+      const params = new URLSearchParams();
+      if (next.scope) params.set('scope', next.scope);
+      if (next.leagueId) params.set('leagueId', next.leagueId);
+      if (next.seasonId) params.set('seasonId', next.seasonId);
 
-    const qs = params.toString();
-    router.replace(`/${locale}/rankings${qs ? `?${qs}` : ''}`);
-  }
+      const qs = params.toString();
+      router.replace(`/${locale}/rankings${qs ? `?${qs}` : ''}`);
+    },
+    [isSameQuery, locale, router],
+  );
 
   const [tab, setTab] = useState<Tab>('LEAGUE');
   const [countryCode, setCountryCode] = useState<string>('');
@@ -159,19 +175,8 @@ export default function RankingsPage() {
   // Mostrar solo ligas del evento seleccionado
   const leaguesByEvent = useMemo(() => {
     if (!seasonId) return [];
-    return leagues.filter((l: any) => l?.seasonId === seasonId);
+    return leagues.filter((l) => (l as unknown as { seasonId?: string | null }).seasonId === seasonId);
   }, [leagues, seasonId]);
-
-  // Helper: inferir sportId/competitionId buscando el seasonId dentro del catálogo
-  function inferSportCompetitionFromSeason(seasonIdToFind: string): { sportId: string; competitionId: string } {
-    for (const s of catalog) {
-      for (const c of s.competitions ?? []) {
-        const found = (c.seasons ?? []).some((se: any) => se.id === seasonIdToFind);
-        if (found) return { sportId: s.id, competitionId: c.id };
-      }
-    }
-    return { sportId: '', competitionId: '' };
-  }
 
   const title = useMemo(() => {
     if (tab === 'LEAGUE') return `${leagueTitle} · Ranking`;
@@ -190,7 +195,7 @@ export default function RankingsPage() {
     const cc = localStorage.getItem('countryCode') || '';
     setCountryCode(cc);
 
-    (async () => {
+    void (async () => {
       try {
         // 1) Catálogo para Sport/Competition/Season
         const cat = await getCatalog(locale);
@@ -214,19 +219,23 @@ export default function RankingsPage() {
         const preferredLeagueId = qsLeagueId || storedActiveLeagueId;
 
         const activeLeague = preferredLeagueId ? myLeagues.find((l) => l.id === preferredLeagueId) : null;
-        if (!nextSeasonId && activeLeague?.seasonId) nextSeasonId = activeLeague.seasonId;
+        const activeLeagueSeasonId = (activeLeague as unknown as { seasonId?: string | null })?.seasonId ?? '';
+        if (!nextSeasonId && activeLeagueSeasonId) nextSeasonId = activeLeagueSeasonId;
 
         // Si hay season, inferir sport/competition
         if (nextSeasonId) {
-          const inferred = (() => {
-            for (const s of cat) {
-              for (const c of s.competitions ?? []) {
-                const found = (c.seasons ?? []).some((se: any) => se.id === nextSeasonId);
-                if (found) return { sportId: s.id, competitionId: c.id };
+          let inferred = { sportId: '', competitionId: '' };
+
+          for (const s of cat) {
+            for (const c of s.competitions ?? []) {
+              const found = (c.seasons ?? []).some((se) => se.id === nextSeasonId);
+              if (found) {
+                inferred = { sportId: s.id, competitionId: c.id };
+                break;
               }
             }
-            return { sportId: '', competitionId: '' };
-          })();
+            if (inferred.sportId) break;
+          }
 
           setSportId(inferred.sportId);
           setCompetitionId(inferred.competitionId);
@@ -243,7 +252,9 @@ export default function RankingsPage() {
         // 5) Default League: prioridad a leagueId del querystring, luego activeLeagueId (solo si pertenece al evento)
         let defaultLeagueId = '';
         if (nextSeasonId && preferredLeagueId) {
-          const ok = myLeagues.some((l) => l.id === preferredLeagueId && (l as any)?.seasonId === nextSeasonId);
+          const ok = myLeagues.some(
+            (l) => l.id === preferredLeagueId && (l as unknown as { seasonId?: string | null })?.seasonId === nextSeasonId,
+          );
           if (ok) defaultLeagueId = preferredLeagueId;
         }
 
@@ -255,10 +266,13 @@ export default function RankingsPage() {
 
         // Si activeLeagueId no pertenece al evento, lo limpiamos para evitar incoherencia
         if (preferredLeagueId && nextSeasonId) {
-          const ok = myLeagues.some((l) => l.id === preferredLeagueId && (l as any)?.seasonId === nextSeasonId);
+          const ok = myLeagues.some(
+            (l) => l.id === preferredLeagueId && (l as unknown as { seasonId?: string | null })?.seasonId === nextSeasonId,
+          );
           if (!ok) localStorage.removeItem('activeLeagueId');
         }
-      } catch (e) {
+      } catch (e: unknown) {
+        // no bloqueante: pantalla aún puede funcionar parcialmente
         console.error('Error loading rankings prerequisites', e);
       }
     })();
@@ -274,7 +288,7 @@ export default function RankingsPage() {
     setLoading(true);
     setError(null);
 
-    (async () => {
+    void (async () => {
       try {
         // URL shareable: reflejar selección actual
         if (tab === 'LEAGUE') {
@@ -284,6 +298,7 @@ export default function RankingsPage() {
         } else {
           pushRankingsQuery({ scope: 'country', seasonId: seasonId || '' });
         }
+
         if (tab === 'LEAGUE') {
           // ✅ NO redirigir. Si no hay liga seleccionada, solo muestra mensaje.
           if (!selectedLeagueId) {
@@ -345,13 +360,13 @@ export default function RankingsPage() {
           setLeagueTitle('Liga');
           setRuleInfo(`Regla: ${data.ruleIdUsed} · Modo: ${data.bestMode}`);
         }
-      } catch (e: any) {
-        setError(e?.message ?? 'Error cargando ranking');
+      } catch (e: unknown) {
+        setError(getErrorMessage(e) || 'Error cargando ranking');
       } finally {
         setLoading(false);
       }
     })();
-  }, [tab, countryCode, selectedLeagueId, seasonId, leagues.length, locale, router]);
+  }, [tab, countryCode, selectedLeagueId, seasonId, leagues.length, locale, router, pushRankingsQuery]);
 
   return (
     <div className="min-h-screen">
@@ -369,27 +384,15 @@ export default function RankingsPage() {
         />
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant={tab === 'LEAGUE' ? 'primary' : 'outline'}
-            onClick={() => setTab('LEAGUE')}
-          >
+          <Button size="sm" variant={tab === 'LEAGUE' ? 'primary' : 'outline'} onClick={() => setTab('LEAGUE')}>
             Liga
           </Button>
 
-          <Button
-            size="sm"
-            variant={tab === 'WORLD' ? 'primary' : 'outline'}
-            onClick={() => setTab('WORLD')}
-          >
+          <Button size="sm" variant={tab === 'WORLD' ? 'primary' : 'outline'} onClick={() => setTab('WORLD')}>
             Mundial
           </Button>
 
-          <Button
-            size="sm"
-            variant={tab === 'COUNTRY' ? 'primary' : 'outline'}
-            onClick={() => setTab('COUNTRY')}
-          >
+          <Button size="sm" variant={tab === 'COUNTRY' ? 'primary' : 'outline'} onClick={() => setTab('COUNTRY')}>
             País
           </Button>
 
@@ -400,8 +403,7 @@ export default function RankingsPage() {
           )}
         </div>
 
-        {/* Filtros en cascada: Sport → Competition → Season (Evento). 
-            En tab LEAGUE además mostramos Liga. */}
+        {/* Filtros en cascada: Sport → Competition → Season (Evento). En tab LEAGUE además mostramos Liga. */}
         <Card className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
             {/* Deporte */}
@@ -524,9 +526,7 @@ export default function RankingsPage() {
           ) : null}
         </Card>
 
-        {loading && (
-          <Card className="p-4 text-[color:var(--muted)]">Cargando…</Card>
-        )}
+        {loading && <Card className="p-4 text-[color:var(--muted)]">Cargando…</Card>}
 
         {error && (
           <Card className="p-4 border border-red-500/30">

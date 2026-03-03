@@ -1,4 +1,6 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
+const RAW_API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
+// Evita URLs tipo "...app//auth/register" si el env trae "/" al final
+const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
 
 export type LoginResponse = {
   user: { id: string; email: string; displayName: string; role: string; createdAt: string };
@@ -120,6 +122,9 @@ export type CatalogSport = {
       id: string;
       slug: string;
       name: string;
+      startDate?: string | null;
+      endDate?: string | null;
+      defaultScoringRuleId?: string | null;
     }[];
     defaultScoringRuleId?: string | null;
   }[];
@@ -393,6 +398,7 @@ export type ApiSeasonConcept = {
 export type ApiScoringRule = {
   id: string; // "B01", "R01", etc.
   name: string;
+  code?: string; // UI convenience (defaults to id)
   description: string | null;
   isGlobal: boolean;
   details: ApiScoringRuleDetail[];
@@ -409,7 +415,8 @@ export async function listScoringRules(token: string, seasonId?: string) {
     cache: "no-store",
   });
   if (!res.ok) throw new Error(await res.text().catch(() => "Failed"));
-  return (await res.json()) as ApiScoringRule[];
+  const rows = (await res.json()) as ApiScoringRule[];
+  return rows.map((r) => ({ ...r, code: r.code ?? r.id }));
 }
 
 export async function getScoringRule(token: string, ruleId: string) {
@@ -507,7 +514,7 @@ export async function recomputeScoring(token: string, seasonId?: string) {
 // ADMIN Catalog CRUD
 // ---------------------------
 
-export type CatalogNames = { es?: string; en?: string };
+export type CatalogNames = { es?: string; en?: string; slug?: string; name?: string };
 
 async function apiJson<T>(res: Response, fallbackMsg: string): Promise<T> {
   if (!res.ok) {
@@ -518,7 +525,7 @@ async function apiJson<T>(res: Response, fallbackMsg: string): Promise<T> {
 }
 
 export async function adminCreateSport(token: string, names: CatalogNames) {
-  const res = await fetch(`${API_BASE}/catalog/sports`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/sport`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -531,7 +538,7 @@ export async function adminCreateSport(token: string, names: CatalogNames) {
 }
 
 export async function adminUpdateSport(token: string, id: string, names: CatalogNames) {
-  const res = await fetch(`${API_BASE}/catalog/sports/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/sport/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -544,7 +551,7 @@ export async function adminUpdateSport(token: string, id: string, names: Catalog
 }
 
 export async function adminDeleteSport(token: string, id: string) {
-  const res = await fetch(`${API_BASE}/catalog/sports/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/sport/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -553,7 +560,7 @@ export async function adminDeleteSport(token: string, id: string) {
 }
 
 export async function adminCreateCompetition(token: string, sportId: string, names: CatalogNames) {
-  const res = await fetch(`${API_BASE}/catalog/competitions`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/competition`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -566,7 +573,7 @@ export async function adminCreateCompetition(token: string, sportId: string, nam
 }
 
 export async function adminUpdateCompetition(token: string, id: string, names: CatalogNames) {
-  const res = await fetch(`${API_BASE}/catalog/competitions/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/competition/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -579,7 +586,7 @@ export async function adminUpdateCompetition(token: string, id: string, names: C
 }
 
 export async function adminDeleteCompetition(token: string, id: string) {
-  const res = await fetch(`${API_BASE}/catalog/competitions/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/competition/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -594,13 +601,19 @@ export async function adminCreateSeason(
   dates?: { startDate?: string | null; endDate?: string | null },
   defaultScoringRuleId?: string
 ) {
-  const res = await fetch(`${API_BASE}/catalog/seasons`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/season`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ competitionId, names, defaultScoringRuleId, ...dates }),
+    body: JSON.stringify({
+      competitionId,
+      names,
+      defaultScoringRuleId,
+      startDate: dates?.startDate ?? null,
+      endDate: dates?.endDate ?? null,
+    }),
   });
 
   return apiJson(res, "Error creando evento");
@@ -614,20 +627,25 @@ export async function adminUpdateSeason(
   defaultScoringRuleId?: string
 ) {
 
-  const res = await fetch(`${API_BASE}/catalog/seasons/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/season/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ names, defaultScoringRuleId, ...dates }),
+    body: JSON.stringify({
+      names,
+      defaultScoringRuleId,
+      startDate: dates?.startDate ?? null,
+      endDate: dates?.endDate ?? null,
+    }),
   });
 
   return apiJson(res, "Error actualizando evento");
 }
 
 export async function adminDeleteSeason(token: string, id: string) {
-  const res = await fetch(`${API_BASE}/catalog/seasons/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE}/catalog/admin/season/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,7 +29,57 @@ type User = {
     };
 };
 
-type AnyObj = Record<string, any>;
+type TeamTranslation = { locale?: string; name?: string };
+
+type TeamLike = {
+    id?: string;
+    teamId?: string;
+    name?: string;
+    displayName?: string;
+    shortName?: string;
+    code?: string;
+    slug?: string;
+    countryCode?: string;
+    flagKey?: string | null;
+    isPlaceholder?: boolean;
+    translations?: TeamTranslation[];
+};
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+    return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function getField(obj: unknown, key: string): unknown {
+    if (!isRecord(obj)) return undefined;
+    return obj[key];
+}
+
+function getString(obj: unknown, key: string): string | undefined {
+    const v = getField(obj, key);
+    return typeof v === "string" ? v : undefined;
+}
+
+function getBool(obj: unknown, key: string): boolean | undefined {
+    const v = getField(obj, key);
+    return typeof v === "boolean" ? v : undefined;
+}
+
+function getNumber(obj: unknown, key: string): number | undefined {
+    const v = getField(obj, key);
+    return typeof v === "number" ? v : undefined;
+}
+
+function errorMessage(e: unknown): string {
+    if (e instanceof Error) return e.message;
+    if (typeof e === "string") return e;
+    if (isRecord(e) && typeof e["message"] === "string") return String(e["message"]);
+    return "Error";
+}
+
+
+type AnyObj = Record<string, unknown>;
 
 type StandingsResponse = {
     seasonId?: string;
@@ -40,12 +90,13 @@ type StandingsResponse = {
         confirmedMatches?: number;
         expectedMatches?: number;
     }>;
-    meta?: any;
+    meta?: Record<string, unknown> | null;
     // en caso de que tu API lo devuelva “flat”
     groupStandings?: AnyObj[];
 };
 
 type ThirdsResponse = {
+    meta?: Record<string, unknown> | null;
     seasonId?: string;
     needsManualCut?: boolean;
     thirds?: AnyObj[];
@@ -56,7 +107,7 @@ type BracketSlotsResponse = {
     seasonId?: string;
     slots?: AnyObj[]; // BracketSlot[] (include team)
     eligibleThirds?: AnyObj[]; // ThirdPlaceRanking[] (include team) solo isQualified=true
-    meta?: any;
+    meta?: Record<string, unknown> | null;
 };
 
 type CatalogSport = {
@@ -119,13 +170,25 @@ async function apiFetch<T>(path: string, token: string, init?: RequestInit): Pro
         let msg = `HTTP ${res.status}`;
 
         try {
-            const data: any = await res.json().catch(() => null);
+            const data: unknown = await res.json().catch(() => null);
 
             if (data) {
-                if (Array.isArray(data.message)) msg = data.message.join(" | ");
-                else if (typeof data.message === "string") msg = data.message;
-                else if (typeof data.error === "string") msg = data.error;
-                else msg = JSON.stringify(data);
+                if (isRecord(data)) {
+                    const m = data["message"];
+                    const err = data["error"];
+
+                    if (Array.isArray(m)) {
+                        msg = m.map((x) => safeText(x)).filter(Boolean).join(" | ");
+                    } else if (typeof m === "string") {
+                        msg = m;
+                    } else if (typeof err === "string") {
+                        msg = err;
+                    } else {
+                        msg = JSON.stringify(data);
+                    }
+                } else {
+                    msg = safeText(data);
+                }
             } else {
                 const txt = await res.text().catch(() => "");
                 if (txt) msg = txt;
@@ -141,18 +204,18 @@ async function apiFetch<T>(path: string, token: string, init?: RequestInit): Pro
     return (await res.json()) as T;
 }
 
-function safeText(v: any) {
+function safeText(v: unknown) {
     if (v === null || v === undefined) return "";
     return String(v);
 }
 
-function teamDisplayName(team: any, locale: string) {
+function teamDisplayName(team: TeamLike | null | undefined, locale: string) {
     if (!team) return "";
 
     // soporte translations (lo típico del proyecto)
     const tr =
-        team.translations?.find((t: any) => t?.locale === locale) ??
-        team.translations?.find((t: any) => (t?.locale ?? "").startsWith(locale)) ??
+        team.translations?.find((t) => (t.locale ?? "") === locale) ??
+        team.translations?.find((t) => (t.locale ?? "").startsWith(locale)) ??
         team.translations?.[0];
 
     return (
@@ -166,12 +229,13 @@ function teamDisplayName(team: any, locale: string) {
     );
 }
 
-function pickTeamName(team: any, locale: string) {
+function pickTeamName(team: TeamLike | null | undefined, locale: string) {
     if (!team) return "";
 
     // Si tu Team tiene translations (muy probable en este proyecto)
     const tr =
-        team.translations?.find((t: any) => t?.locale === locale) ??
+        team.translations?.find((t) => (t.locale ?? "") === locale) ??
+        team.translations?.find((t) => (t.locale ?? "").startsWith(locale)) ??
         team.translations?.[0];
 
     return (
@@ -209,11 +273,7 @@ export default function AdminGroupsPage() {
     const [bracketRaw, setBracketRaw] = useState<BracketSlotsResponse | null>(null);
 
     const features = useMemo(() => {
-        const m =
-            (standingsRaw as any)?.meta ??
-            (thirdsRaw as any)?.meta ??
-            (bracketRaw as any)?.meta ??
-            null;
+        const m = standingsRaw?.meta ?? thirdsRaw?.meta ?? bracketRaw?.meta ?? null;
 
         // Future-proof: por defecto NO mostramos features “especiales”
         // a menos que el back las habilite explícitamente.
@@ -236,7 +296,7 @@ export default function AdminGroupsPage() {
     };
 
     // En WBC usamos won/lost + carreras (reusamos gf/ga) y calculamos W%
-    const winPct = (r: any) => {
+    const winPct = (r: AnyObj) => {
         const w = Number(r?.won ?? 0);
         const l = Number(r?.lost ?? 0);
         const den = w + l;
@@ -272,7 +332,7 @@ export default function AdminGroupsPage() {
     const [openManualGroup, setOpenManualGroup] = useState<string | null>(null);
     const [manualGroupText, setManualGroupText] = useState<string>("");
     const [manualGroupReason, setManualGroupReason] = useState<string>("");
-    const [manualGroupRows, setManualGroupRows] = useState<any[]>([]);
+    const [manualGroupRows, setManualGroupRows] = useState<AnyObj[]>([]);
 
     const [openManualThirds, setOpenManualThirds] = useState<boolean>(false);
     const [manualThirdsSelected, setManualThirdsSelected] = useState<Record<string, boolean>>({});
@@ -288,7 +348,7 @@ export default function AdminGroupsPage() {
 
     const groups = useMemo(() => {
         // Caso A: API devuelve { groups: [{ groupCode, standings: [...] }] }
-        if (standingsRaw?.groups?.length) return standingsRaw.groups as any[];
+        if (standingsRaw?.groups?.length) return standingsRaw.groups as AnyObj[];
 
         // Caso B: API devuelve flat { groupStandings: [...] } → agrupamos por groupCode
         const flat = standingsRaw?.groupStandings;
@@ -315,7 +375,7 @@ export default function AdminGroupsPage() {
 
     const groupCodes = useMemo(() => {
         const codes = (groups ?? [])
-            .map((g: any) => String(g.groupCode ?? "").trim())
+            .map((g: AnyObj) => String(g.groupCode ?? "").trim())
             .filter(Boolean);
 
         return Array.from(new Set(codes)).sort((a, b) => a.localeCompare(b));
@@ -323,20 +383,20 @@ export default function AdminGroupsPage() {
 
     const visibleGroups = useMemo(() => {
         if (!groupFilterSet || groupFilterSet.size === 0) return groups ?? [];
-        return (groups ?? []).filter((g: any) => groupFilterSet.has(String(g.groupCode ?? "")));
+        return (groups ?? []).filter((g: AnyObj) => groupFilterSet.has(String(g.groupCode ?? "")));
     }, [groups, groupFilterSet]);
 
     const closeInfo = useMemo(() => {
-        const raw = (standingsRaw?.groups ?? []) as any[];
+        const raw = (standingsRaw?.groups ?? []) as AnyObj[];
 
-        const f = (standingsRaw as any)?.meta ?? null;
+        const f = standingsRaw?.meta ?? null;
         if (f?.groupsClosed) return { canClose: false, msg: "Fase de grupos ya está cerrada." };
 
         if (!raw.length) return { canClose: false, msg: "Aún no hay grupos cargados." };
 
         const incomplete = raw
-            .filter((g: any) => !g.isComplete)
-            .map((g: any) => `${g.groupCode}(${g.confirmedMatches ?? 0}/${g.expectedMatches ?? 6})`);
+            .filter((g: AnyObj) => !g.isComplete)
+            .map((g: AnyObj) => `${g.groupCode}(${g.confirmedMatches ?? 0}/${g.expectedMatches ?? 6})`);
 
         if (incomplete.length === 0) return { canClose: true, msg: "Todos los grupos completos." };
 
@@ -353,7 +413,7 @@ export default function AdminGroupsPage() {
     }, [thirdsRaw]);
 
     const thirdsCutTieSet = useMemo(() => {
-        const rows = (thirds ?? []).map((r: any) => ({
+        const rows = (thirds ?? []).map((r: AnyObj) => ({
             teamId: safeText(r.teamId),
             points: Number(r.points ?? 0),
             gd: Number(r.gd ?? 0),
@@ -362,7 +422,7 @@ export default function AdminGroupsPage() {
 
         if (rows.length < 9) return new Set<string>();
 
-        const key = (x: any) => `${x.points}|${x.gd}|${x.gf}`;
+        const key = (x: AnyObj) => `${x.points}|${x.gd}|${x.gf}`;
         const map = new Map<string, { min: number; max: number; ids: Set<string> }>();
 
         rows.forEach((r, idx) => {
@@ -381,13 +441,13 @@ export default function AdminGroupsPage() {
     }, [thirds]);
 
     const isGroupStageComplete = useMemo(() => {
-        const raw = (standingsRaw?.groups ?? []) as any[];
-        return raw.length > 0 && raw.every((g: any) => !!g.isComplete);
+        const raw = (standingsRaw?.groups ?? []) as AnyObj[];
+        return raw.length > 0 && raw.every((g: AnyObj) => !!g.isComplete);
     }, [standingsRaw]);
 
     const qualifiedThirdIds = useMemo(() => {
         const set = new Set<string>();
-        for (const r of thirds as any[]) {
+        for (const r of thirds as AnyObj[]) {
             if (r?.isQualified) {
                 const id = String(r.teamId ?? "");
                 if (id) set.add(id);
@@ -422,8 +482,8 @@ export default function AdminGroupsPage() {
             const sid =
                 forcedSeasonId ||
                 seasonId ||
-                (standingsRaw as any)?.seasonId ||
-                (thirdsRaw as any)?.seasonId ||
+                standingsRaw?.seasonId ||
+                thirdsRaw?.seasonId ||
                 user?.activeSeasonId ||
                 "";
 
@@ -441,7 +501,7 @@ export default function AdminGroupsPage() {
 
             // Importante: bracket NO debe tumbar toda la carga si falla.
             // Además, si el back indica bracket deshabilitado (ej: béisbol), no lo pedimos.
-            const f = (s as any)?.meta ?? (t as any)?.meta ?? null;
+            const f = s?.meta ?? t?.meta ?? null;
             const bracketOk = f?.bracketR32Enabled !== false;
 
             if (sidResolved && bracketOk) {
@@ -459,8 +519,8 @@ export default function AdminGroupsPage() {
             }
 
             setLastOk("Datos cargados.");
-        } catch (e: any) {
-            setError(e?.message ?? "Error cargando datos");
+        } catch (e: unknown) {
+            setError(errorMessage(e) || "Error cargando datos");
         } finally {
             setLoading(false);
         }
@@ -495,8 +555,8 @@ export default function AdminGroupsPage() {
             });
             setLastOk("Fase de grupos cerrada. Re-cargando datos...");
             await loadAll(token, seasonId);
-        } catch (e: any) {
-            setError(e?.message ?? "Error cerrando fase de grupos");
+        } catch (e: unknown) {
+            setError(errorMessage(e) || "Error cerrando fase de grupos");
         } finally {
             setBusy(null);
         }
@@ -523,8 +583,8 @@ export default function AdminGroupsPage() {
             );
             setLastOk("Placeholders KO reaplicados. Re-cargando datos...");
             await loadAll(token, seasonId);
-        } catch (e: any) {
-            setError(e?.message ?? "Error reaplicando placeholders KO");
+        } catch (e: unknown) {
+            setError(errorMessage(e) || "Error reaplicando placeholders KO");
         } finally {
             setBusy(null);
         }
@@ -557,8 +617,8 @@ export default function AdminGroupsPage() {
 
             setLastOk("Slot actualizado.");
             await loadAll(token, seasonId);
-        } catch (e: any) {
-            setError(e?.message ?? "Error guardando slot");
+        } catch (e: unknown) {
+            setError(errorMessage(e) || "Error guardando slot");
         } finally {
             setBusy(null);
         }
@@ -608,8 +668,8 @@ export default function AdminGroupsPage() {
             setManualGroupText("");
             setManualGroupReason("");
             await loadAll(token, seasonId);
-        } catch (e: any) {
-            setError(e?.message ?? "Error aplicando manual del grupo");
+        } catch (e: unknown) {
+            setError(errorMessage(e) || "Error aplicando manual del grupo");
         } finally {
             setBusy(null);
         }
@@ -651,8 +711,8 @@ export default function AdminGroupsPage() {
             setManualThirdsText("");
             setManualThirdsReason("");
             await loadAll(token, seasonId);
-        } catch (e: any) {
-            setError(e?.message ?? "Error aplicando manual de terceros");
+        } catch (e: unknown) {
+            setError(errorMessage(e) || "Error aplicando manual de terceros");
         } finally {
             setBusy(null);
         }
@@ -707,13 +767,13 @@ export default function AdminGroupsPage() {
                     }
 
                     await loadAll(tok, sid || undefined);
-                } catch (e: any) {
-                    setError(e?.message ?? "Error cargando catálogo/contexto");
+                } catch (e: unknown) {
+                    setError(errorMessage(e) || "Error cargando catálogo/contexto");
                     await loadAll(tok); // fallback: igual intenta cargar con lo que haya
                 }
             })
             .catch((err) => {
-                setError(err?.message ?? "Error");
+                setError(errorMessage(err) || "Error");
                 localStorage.removeItem("token");
                 router.replace(`/${locale}/login`);
             });
@@ -724,7 +784,7 @@ export default function AdminGroupsPage() {
 
     // --- TERCEROS: lógica de corte manual (FIJOS vs EMPATE) ---
     const thirdsCutMeta = useMemo(() => {
-        const list = (thirds ?? []) as any[];
+        const list = (thirds ?? []) as AnyObj[];
 
         if (list.length === 0) {
             return {
@@ -736,7 +796,7 @@ export default function AdminGroupsPage() {
             };
         }
 
-        const key = (x: any) => `${safeText(x?.points)}|${safeText(x?.gd)}|${safeText(x?.gf)}`;
+        const key = (x: AnyObj) => `${safeText(x?.points)}|${safeText(x?.gd)}|${safeText(x?.gf)}`;
 
         const map = new Map<string, { min: number; max: number; ids: Set<string> }>();
         list.forEach((x, idx) => {
@@ -1086,8 +1146,8 @@ export default function AdminGroupsPage() {
                                         variant={selected ? "primary" : "secondary"}
                                         title="Click: toggle · Shift+Click: solo este"
                                         className="min-w-[40px] justify-center"
-                                        onClick={(e) => {
-                                            if ((e as any).shiftKey) {
+                                        onClick={(e: ReactMouseEvent<HTMLButtonElement>) => {
+                                            if (e.shiftKey) {
                                                 setGroupFilterSet(new Set([code]));
                                                 return;
                                             }
@@ -1117,7 +1177,7 @@ export default function AdminGroupsPage() {
                 )}
 
                 <div className="mt-3 grid gap-4">
-                    {visibleGroups.map((g: any) => {
+                    {visibleGroups.map((g: AnyObj) => {
                         const groupCode = safeText(g.groupCode ?? "??");
                         const rows: AnyObj[] = Array.isArray(g.standings) ? g.standings : [];
 
@@ -1126,23 +1186,23 @@ export default function AdminGroupsPage() {
 
                         const isComplete = !!g.isComplete || (expected > 0 && confirmed >= expected);
 
-                        const needsManualGroup = isComplete && rows.some((r: any) => !!r.needsManual);
+                        const needsManualGroup = isComplete && rows.some((r: AnyObj) => !!r.needsManual);
 
                         const sorted = [...rows].sort((a, b) => {
-                            const pa = a.posGroup ?? 999;
-                            const pb = b.posGroup ?? 999;
+                            const pa = Number(a.posGroup ?? 999);
+                            const pb = Number(b.posGroup ?? 999);
                             if (pa !== pb) return pa - pb;
 
-                            const pta = a.points ?? 0;
-                            const ptb = b.points ?? 0;
+                            const pta = Number(a.points ?? 0);
+                            const ptb = Number(b.points ?? 0);
                             if (ptb !== pta) return ptb - pta;
 
-                            const gda = a.gd ?? 0;
-                            const gdb = b.gd ?? 0;
+                            const gda = Number(a.gd ?? 0);
+                            const gdb = Number(b.gd ?? 0);
                             if (gdb !== gda) return gdb - gda;
 
-                            const gfa = a.gf ?? 0;
-                            const gfb = b.gf ?? 0;
+                            const gfa = Number(a.gf ?? 0);
+                            const gfb = Number(b.gf ?? 0);
                             return gfb - gfa;
                         });
 
@@ -1185,9 +1245,13 @@ export default function AdminGroupsPage() {
                                         </thead>
                                         <tbody>
                                             {sorted.map((r, idx) => {
+                                                const teamObj = getField(r, "team");
                                                 const teamName =
-                                                    r.team?.name ?? r.teamName ?? r.team?.displayName ?? r.name ?? safeText(r.teamId ?? r.team_id ?? "Equipo");
-
+                                                    getString(teamObj, "name") ??
+                                                    getString(r, "teamName") ??
+                                                    getString(teamObj, "displayName") ??
+                                                    getString(r, "name") ??
+                                                    safeText(getField(r, "teamId") ?? getField(r, "team_id") ?? "Equipo");
                                                 const pos = Number(r.posGroup ?? idx + 1);
                                                 const tid = safeText(r.teamId ?? "");
 
@@ -1215,8 +1279,8 @@ export default function AdminGroupsPage() {
                                                         <td style={{ padding: "6px 8px", fontWeight: 600, background: rowBg }}>
                                                             <TeamWithFlag
                                                                 name={teamName}
-                                                                flagKey={r.team?.flagKey ?? (r as any).flagKey ?? null}
-                                                                isPlaceholder={!!r.team?.isPlaceholder}
+                                                                flagKey={(getString(teamObj, "flagKey") ?? getString(r, "flagKey")) ?? null}
+                                                                isPlaceholder={getBool(teamObj, "isPlaceholder") === true}
                                                             />
                                                         </td>
                                                         {columns.map((c) => {
@@ -1224,8 +1288,8 @@ export default function AdminGroupsPage() {
                                                                 c.key === "winPct"
                                                                     ? fmtPct(winPct(r))
                                                                     : c.key === "played"
-                                                                        ? (r.played ?? r.pj ?? "")
-                                                                        : (r as any)[c.key];
+                                                                        ? (getField(r, "played") ?? getField(r, "pj") ?? "")
+                                                                        : getField(r, c.key);
 
                                                             return (
                                                                 <td key={c.key} style={{ padding: "6px 8px", background: rowBg }}>
@@ -1275,11 +1339,14 @@ export default function AdminGroupsPage() {
                                                     const willOpen = openManualGroup !== groupCode;
 
                                                     if (willOpen) {
-                                                        const rowsSnap = [...sorted].map((x: any) => ({
-                                                            teamId: safeText(x.teamId),
-                                                            name: safeText(x.name ?? x.team?.name ?? x.teamName ?? "Equipo"),
-                                                            needsManual: !!x.needsManual,
-                                                        }));
+                                                        const rowsSnap = [...sorted].map((x: AnyObj) => {
+                                                            const tx = getField(x, "team");
+                                                            return {
+                                                                teamId: safeText(getField(x, "teamId")),
+                                                                name: safeText(getString(x, "name") ?? getString(tx, "name") ?? getString(x, "teamName") ?? "Equipo"),
+                                                                needsManual: getBool(x, "needsManual") === true,
+                                                            };
+                                                        });
 
                                                         setOpenManualGroup(groupCode);
                                                         setManualGroupRows(rowsSnap);
@@ -1302,19 +1369,21 @@ export default function AdminGroupsPage() {
                                                 <div className="text-xs text-[var(--muted)]">Reordena con las flechas el orden final (1→4). Luego aplica.</div>
 
                                                 <div style={{ display: "grid", gap: 8 }}>
-                                                    {manualGroupRows.map((row: any, i: number) => {
-                                                        const label = safeText(row.name || "Equipo");
-
-                                                        const canMove = !!row.needsManual;
+                                                    {manualGroupRows.map((row: unknown, i: number) => {
+                                                        const rr = isRecord(row) ? row : {};
+                                                        const label = safeText(getString(rr, "name") ?? "Equipo");
+                                                        const canMove = getBool(rr, "needsManual") === true;
                                                         const prev = i > 0 ? manualGroupRows[i - 1] : null;
                                                         const next = i < manualGroupRows.length - 1 ? manualGroupRows[i + 1] : null;
 
-                                                        const upDisabled = i === 0 || !canMove || !prev?.needsManual;
-                                                        const downDisabled = i === manualGroupRows.length - 1 || !canMove || !next?.needsManual;
+                                                        const prevRec = isRecord(prev) ? prev : {};
+                                                        const nextRec = isRecord(next) ? next : {};
+                                                        const upDisabled = i === 0 || !canMove || getBool(prevRec, "needsManual") !== true;
+                                                        const downDisabled = i === manualGroupRows.length - 1 || !canMove || getBool(nextRec, "needsManual") !== true;
 
                                                         return (
                                                             <div
-                                                                key={row.teamId || i}
+                                                                key={getString(rr, "teamId") ?? i}
                                                                 className={
                                                                     "grid grid-cols-[44px_1fr_110px] items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2 " +
                                                                     (canMove ? "ring-1 ring-[var(--accent)]" : "opacity-90")
@@ -1342,7 +1411,7 @@ export default function AdminGroupsPage() {
                                                                                 copy[i - 1] = copy[i];
                                                                                 copy[i] = tmp;
 
-                                                                                setManualGroupText(copy.map((x: any) => safeText(x.teamId)).join("\n"));
+                                                                                setManualGroupText(copy.map((x: AnyObj) => safeText(x.teamId)).join("\n"));
                                                                                 return copy;
                                                                             });
                                                                         }}
@@ -1363,7 +1432,7 @@ export default function AdminGroupsPage() {
                                                                                 copy[i + 1] = copy[i];
                                                                                 copy[i] = tmp;
 
-                                                                                setManualGroupText(copy.map((x: any) => safeText(x.teamId)).join("\n"));
+                                                                                setManualGroupText(copy.map((x: AnyObj) => safeText(x.teamId)).join("\n"));
                                                                                 return copy;
                                                                             });
                                                                         }}
@@ -1450,30 +1519,48 @@ export default function AdminGroupsPage() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {thirds.map((r: any, idx: number) => {
-                                            const teamName = r.team?.name ?? r.teamName ?? r.team?.displayName ?? r.name ?? safeText(r.teamId ?? "Equipo");
+                                        {thirds.map((r: unknown, idx: number) => {
+                                            const rr = isRecord(r) ? r : {};
+                                            const team = getField(rr, "team");
+                                            const teamName =
+                                                getString(team, "name") ??
+                                                getString(rr, "teamName") ??
+                                                getString(team, "displayName") ??
+                                                getString(rr, "name") ??
+                                                safeText(getField(rr, "teamId") ?? "Equipo");
 
                                             return (
-                                                <tr key={safeText(r.teamId ?? idx)} style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.rankGlobal ?? r.rank ?? idx + 1)}</td>
+                                                <tr
+                                                    key={safeText(getField(rr, "teamId") ?? idx)}
+                                                    style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+                                                >
+                                                    <td style={{ padding: "6px 8px" }}>
+                                                        {safeText(getField(rr, "rankGlobal") ?? getField(rr, "rank") ?? idx + 1)}
+                                                    </td>
+
                                                     <td style={{ padding: "6px 8px", fontWeight: 600 }}>
                                                         <TeamWithFlag
                                                             name={teamName}
-                                                            flagKey={r.team?.flagKey ?? (r as any).flagKey ?? null}
-                                                            isPlaceholder={!!r.team?.isPlaceholder}
+                                                            flagKey={(getField(team, "flagKey") as string | null | undefined) ?? getString(rr, "flagKey") ?? null}
+                                                            isPlaceholder={getBool(team, "isPlaceholder") === true}
                                                         />
                                                     </td>
-                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.points ?? "")}</td>
-                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.gd ?? "")}</td>
-                                                    <td style={{ padding: "6px 8px" }}>{safeText(r.gf ?? "")}</td>
+
+                                                    <td style={{ padding: "6px 8px" }}>{safeText(getField(rr, "points") ?? "")}</td>
+                                                    <td style={{ padding: "6px 8px" }}>{safeText(getField(rr, "gd") ?? "")}</td>
+                                                    <td style={{ padding: "6px 8px" }}>{safeText(getField(rr, "gf") ?? "")}</td>
 
                                                     <td className="py-2 text-center" style={{ width: 110, verticalAlign: "middle" }}>
-                                                        <span style={{ fontSize: 15, lineHeight: "18px", display: "inline-block" }}>{r.isQualified ? "✅" : "❌"}</span>
+                                                        <span style={{ fontSize: 15, lineHeight: "18px", display: "inline-block" }}>
+                                                            {getBool(rr, "isQualified") === true ? "✅" : "❌"}
+                                                        </span>
                                                     </td>
 
                                                     <td style={{ padding: "6px 8px", fontSize: 12, opacity: 0.8 }}>
-                                                        {thirdsCutTieSet.has(safeText(r.teamId)) && r.manualOverride ? "override" : ""}
-                                                        {thirdsCutTieSet.has(safeText(r.teamId)) && r.manualReason ? ` · ${safeText(r.manualReason)}` : ""}
+                                                        {thirdsCutTieSet.has(safeText(getField(rr, "teamId"))) && getBool(rr, "manualOverride") === true ? "override" : ""}
+                                                        {thirdsCutTieSet.has(safeText(getField(rr, "teamId"))) && getString(rr, "manualReason")
+                                                            ? ` · ${safeText(getString(rr, "manualReason"))}`
+                                                            : ""}
                                                     </td>
                                                 </tr>
                                             );
@@ -1505,7 +1592,7 @@ export default function AdminGroupsPage() {
                                                 setOpenManualThirds(willOpen);
 
                                                 if (willOpen) {
-                                                    const autoTop8 = (thirds ?? []).slice(0, 8).map((x: any) => safeText(x.teamId)).filter(Boolean);
+                                                    const autoTop8 = (thirds ?? []).slice(0, 8).map((x: AnyObj) => safeText(x.teamId)).filter(Boolean);
 
                                                     const init: Record<string, boolean> = {};
                                                     for (const id of autoTop8) init[id] = true;
@@ -1545,7 +1632,7 @@ export default function AdminGroupsPage() {
                                                         size="sm"
                                                         variant="secondary"
                                                         onClick={() => {
-                                                            const autoTop8 = (thirds ?? []).slice(0, 8).map((x: any) => safeText(x.teamId)).filter(Boolean);
+                                                            const autoTop8 = (thirds ?? []).slice(0, 8).map((x: AnyObj) => safeText(x.teamId)).filter(Boolean);
 
                                                             const next: Record<string, boolean> = {};
                                                             for (const id of autoTop8) next[id] = true;
@@ -1578,9 +1665,18 @@ export default function AdminGroupsPage() {
                                             </div>
 
                                             <div className="grid gap-1.5">
-                                                {(thirds ?? []).map((r: any, i: number) => {
-                                                    const id = safeText(r.teamId);
-                                                    const name = safeText(r.team?.name ?? r.teamName ?? r.team?.displayName ?? r.name ?? id);
+                                                {(thirds ?? []).map((r: unknown, i: number) => {
+                                                    const rr = isRecord(r) ? r : {};
+                                                    const teamObj = getField(rr, "team");
+
+                                                    const id = safeText(getField(rr, "teamId") ?? getField(teamObj, "id") ?? "");
+                                                    const name = safeText(
+                                                        getString(teamObj, "name") ??
+                                                        getString(rr, "teamName") ??
+                                                        getString(teamObj, "displayName") ??
+                                                        getString(rr, "name") ??
+                                                        id
+                                                    );
                                                     const inTie = thirdsCutMeta.needs && thirdsCutMeta.tieIds.has(id);
                                                     const isLocked = thirdsCutMeta.needs && thirdsCutMeta.lockedIds.has(id);
                                                     const checked = !!manualThirdsSelected[id];
@@ -1651,7 +1747,7 @@ export default function AdminGroupsPage() {
                                                             />
 
                                                             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                                                                <div style={{ fontWeight: 800, minWidth: 30 }}>{safeText(r.rankGlobal ?? r.rank ?? i + 1)}.</div>
+                                                                <div style={{ fontWeight: 800, minWidth: 30 }}>{safeText(getField(rr, "rankGlobal") ?? getField(rr, "rank") ?? i + 1)}.</div>
 
                                                                 <div style={{ fontWeight: 700 }}>{name}</div>
 
@@ -1790,27 +1886,34 @@ export default function AdminGroupsPage() {
                                         <tbody>
                                             {bracketSlots
                                                 .slice()
-                                                .sort(
-                                                    (a: any, b: any) =>
-                                                        Number(a.matchNo ?? 999) - Number(b.matchNo ?? 999) ||
-                                                        String(a.slot ?? "").localeCompare(String(b.slot ?? ""))
-                                                )
-                                                .map((s: any, idx: number) => {
-                                                    const matchNo = Number(s.matchNo ?? 0);
-                                                    const slot = String(s.slot ?? "").toUpperCase(); // HOME / AWAY esperado
+                                                .sort((a: unknown, b: unknown) => {
+                                                    const ar = isRecord(a) ? a : {};
+                                                    const br = isRecord(b) ? b : {};
+                                                    const am = getNumber(ar, "matchNo") ?? 999;
+                                                    const bm = getNumber(br, "matchNo") ?? 999;
+                                                    if (am !== bm) return am - bm;
+                                                    const as = (getString(ar, "slot") ?? "").toUpperCase();
+                                                    const bs = (getString(br, "slot") ?? "").toUpperCase();
+                                                    return as.localeCompare(bs);
+                                                })
+                                                .map((s: unknown, idx: number) => {
+                                                    const sr = isRecord(s) ? s : {};
+                                                    const matchNo = getNumber(sr, "matchNo") ?? 0
+                                                    const slot = String(getString(sr, "slot") ?? "") // HOME / AWAY esperado
                                                     const slotOk = slot === "HOME" || slot === "AWAY";
 
                                                     const key = `${matchNo}-${slot || idx}`;
-                                                    const currentTeamId = s.teamId ? String(s.teamId) : "";
-                                                    const isAutoAssigned = !!s.teamId && !s.manualOverride;
+                                                    const currentTeamId = getString(sr, "teamId") ? String(getString(sr, "teamId")) : "";
+                                                    const isAutoAssigned = !!getString(sr, "teamId") && !getBool(sr, "manualOverride") === true;
                                                     const locked = isAutoAssigned;
                                                     const pick = locked ? currentTeamId : (bracketPickByKey[key] ?? currentTeamId);
 
-                                                    const placeholder = s.placeholderText ?? s.sourceKey ?? "";
+                                                    const placeholder = getString(sr, "placeholderText") ?? getString(sr, "sourceKey") ?? ""
+
                                                     const isThirdPlaceholder =
                                                         String(placeholder).includes("3º") ||
                                                         String(placeholder).includes("3°") ||
-                                                        !!s.needsManual;
+                                                        !!getBool(sr, "needsManual") === true;
 
                                                     // mostramos solo lo pendiente (terceros)
                                                     if (!isThirdPlaceholder) return null;
@@ -1853,18 +1956,24 @@ export default function AdminGroupsPage() {
                                                                     <option value="">(sin asignar)</option>
 
                                                                     {currentTeamId &&
-                                                                        !eligibleThirds.some((x: any) =>
-                                                                            String(x.teamId ?? x.team?.id ?? "") === currentTeamId
+                                                                        !eligibleThirds.some((x: AnyObj) =>
+                                                                            String(getField(x, "teamId") ?? getField(getField(x, "team"), "id") ?? "")
                                                                         ) && (
                                                                             <option value={currentTeamId}>
-                                                                                {teamDisplayName(s.team, locale) || s.team?.slug || currentTeamId}
+                                                                                {teamDisplayName(getField(sr, "team") as TeamLike | null | undefined, locale) ||
+                                                                                    getString(getField(sr, "team"), "slug") ||
+                                                                                    currentTeamId}
                                                                             </option>
                                                                         )}
 
-                                                                    {eligibleThirds.map((t: any) => {
-                                                                        const tid = String(t.teamId ?? t.team?.id ?? "");
+                                                                    {eligibleThirds.map((t: AnyObj) => {
+                                                                        const tid = String(getField(t, "teamId") ?? getField(getField(t, "team"), "id") ?? "");
                                                                         const labelRank = t.rankGlobal ?? t.rank ?? "";
-                                                                        const name = teamDisplayName(t.team, locale) || t.team?.slug || tid;
+                                                                        const teamT = getField(t, "team");
+                                                                        const name =
+                                                                            teamDisplayName(teamT as TeamLike | null | undefined, locale) ||
+                                                                            getString(teamT, "slug") ||
+                                                                            tid;
 
                                                                         const usedElsewhere = bracketUsedTeamIds.has(tid) && tid !== currentTeamId;
 
