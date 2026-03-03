@@ -56,6 +56,10 @@ function normalizeTranslations(names: LocaleNameMap) {
   return out;
 }
 
+// ✅ Feature flag simple: por ahora solo habilitar BÉISBOL en catálogo público.
+// No elimina nada; solo oculta otros deportes del /catalog.
+const ENABLED_SPORT_SLUGS = new Set<string>(['baseball']);
+
 @Injectable()
 export class CatalogService {
   constructor(private prisma: PrismaService) { }
@@ -78,7 +82,13 @@ export class CatalogService {
       },
     });
 
-    return sports.map((s) => ({
+    // Desactivar deportes no habilitados (ej: soccer) sin borrar data.
+    const filteredSports = sports.filter(
+      (s) => !['soccer', 'football', 'futbol', 'fútbol'].includes(s.slug),
+    );
+
+    //return sports.map((s) => ({
+    return filteredSports.map((s) => ({
       id: s.id,
       slug: s.slug,
       name: s.translations.find((t) => t.locale === locale)?.name ?? s.slug,
