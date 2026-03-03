@@ -1267,25 +1267,34 @@ export default function LeaguesPage() {
                   {loadingRuleDetails ? 'Cargando detalle…' : selectedRule ? selectedRule.name : '—'}
                 </div>
 
-                <div className="mt-3 space-y-2">
-                  {concepts.map((c) => {
-                    const pts = selectedRule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
-                    return (
-                      <div key={c.code} className="flex items-center justify-between">
-                        <div className="text-sm text-[var(--foreground)]">{c.label}</div>
-                        {isEditingLeagueCustomRule ? (
-                          <input
-                            value={editPoints[c.code] ?? '0'}
-                            onChange={(e) => setEditPoints((prev) => ({ ...prev, [c.code]: e.target.value }))}
-                            className="w-24 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-right text-[var(--foreground)]"
-                            inputMode="numeric"
-                          />
-                        ) : (
-                          <div className="text-sm font-semibold">{pts}</div>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div className="mt-3">
+                  {/* Header columna puntos */}
+                  <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
+                    <div>&nbsp;</div>
+                    <div className="w-24 text-right font-semibold">Pts</div>
+                  </div>
+
+                  <div className="mt-2 space-y-2">
+                    {concepts.map((c) => {
+                      const pts =
+                        selectedRule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
+                      return (
+                        <div key={c.code} className="flex items-center justify-between">
+                          <div className="text-sm text-[var(--foreground)]">{c.label}</div>
+                          {isEditingLeagueCustomRule ? (
+                            <input
+                              value={editPoints[c.code] ?? '0'}
+                              onChange={(e) => setEditPoints((prev) => ({ ...prev, [c.code]: e.target.value }))}
+                              className="w-24 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-right text-[var(--foreground)]"
+                              inputMode="numeric"
+                            />
+                          ) : (
+                            <div className="text-sm font-semibold">{pts}</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </Card>
             )}
