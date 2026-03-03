@@ -19,26 +19,30 @@ async function bootstrap() {
     origin: (origin, cb) => {
       // Permite requests sin Origin (curl/postman/healthchecks)
       if (!origin) return cb(null, true);
- 
+
       const allowList = new Set<string>([
         'https://quiniela-mundial-web.vercel.app',
         'https://quiniela-mundial-we.vercel.app',
         'http://localhost:3000',
+
+        // Producción (dominio)
+        'https://quinielamania.com',
+        'https://www.quinielamania.com',
       ]);
- 
+
       // Permite previews del proyecto web (Vercel) con variaciones del subdominio
       const isWebPreview = /^https:\/\/quiniela-mundial-we-.*\.vercel\.app$/i.test(
         origin,
       );
- 
+
       // Importante: devolver el ORIGIN (string) para que el middleware emita:
       // Access-Control-Allow-Origin: <origin>
       if (allowList.has(origin) || isWebPreview) return cb(null, origin);
- 
+
       return cb(new Error(`CORS blocked: ${origin}`), false);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders:'Content-Type, Authorization, Accept, Origin, X-Requested-With',
+    allowedHeaders: 'Content-Type, Authorization, Accept, Origin, X-Requested-With',
     credentials: true,
   });
 
