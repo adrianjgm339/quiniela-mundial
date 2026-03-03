@@ -13,17 +13,37 @@ dotenv.config({ path: path.resolve(process.cwd(), 'apps/api/.env') });
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // CORS: el "origin" NO incluye path (ej: NO "/es").
+  // Además, los Preview de Vercel cambian de subdominio, así que usamos regex.
   app.enableCors({
-    origin: [
-      'https://quiniela-mundial-web.vercel.app',
-      'http://localhost:3000',
-    ],
+    origin: (origin, cb) => {
+      // Permite requests sin Origin (curl/postman/healthchecks)
+      if (!origin) return cb(null, true);
+
+      const allowList = new Set<string>([
+        'https://quiniela-mundial-web.vercel.app',
+        'http://localhost:3000',
+      ]);
+
+      // Permite previews del proyecto web (Vercel)
+      // Ejemplos:
+      // https://quiniela-mundial-we-git-8c8f9b-adrian-garcias-projects-9e10c8f8.vercel.app
+      // https://quiniela-mundial-we-git-<hash>-adrian-garcias-projects-9e10c8f8.vercel.app
+      const isWebPreview =
+        /^https:\/\/quiniela-mundial-we-git-[a-z0-9]+-adrian-garcias-projects-9e10c8f8\.vercel\.app$/i.test(
+          origin,
+        );
+
+      if (allowList.has(origin) || isWebPreview) return cb(null, true);
+      return cb(new Error(`CORS blocked: ${origin}`), false);
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Authorization',
-    credentials: true, // solo si usas cookies
+    credentials: true,
   });
 
   await app.listen(3001);
   console.log(`API running on http://localhost:3001`);
 }
+
 bootstrap();
