@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   getMyLeagues,
@@ -67,9 +67,9 @@ function toMeInfo(v: unknown): MeInfo {
 
   const activeSeason = isRecord(v.activeSeason)
     ? {
-        id: typeof v.activeSeason.id === 'string' ? v.activeSeason.id : undefined,
-        name: typeof v.activeSeason.name === 'string' ? v.activeSeason.name : undefined,
-      }
+      id: typeof v.activeSeason.id === 'string' ? v.activeSeason.id : undefined,
+      name: typeof v.activeSeason.name === 'string' ? v.activeSeason.name : undefined,
+    }
     : undefined;
 
   return {
@@ -199,6 +199,7 @@ export default function LeaguesPage() {
   const [loadingRules, setLoadingRules] = useState(false);
 
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>(''); // '' = "Seleccionar"
+  const selectedLeagueIdRef = useRef<string>('');
   const [selectedRuleId, setSelectedRuleId] = useState<string>(''); // '' = sin regla seleccionada
   const [selectedRule, setSelectedRule] = useState<ApiScoringRule | null>(null);
   const [loadingRuleDetails, setLoadingRuleDetails] = useState(false);
@@ -316,10 +317,20 @@ export default function LeaguesPage() {
       setLeagues(data);
 
       // No auto-seleccionamos nada: dejamos "Seleccionar" por defecto
-      if (selectedLeagueId === NEW_LEAGUE) return data;
+      //if (selectedLeagueId === NEW_LEAGUE) return data;
+      if (selectedLeagueIdRef.current === NEW_LEAGUE) return data;
 
       // si la liga seleccionada ya no existe, limpiar selección
-      if (selectedLeagueId && !data.some((x) => x.id === selectedLeagueId)) {
+      //if (selectedLeagueId && !data.some((x) => x.id === selectedLeagueId)) {
+      //  setSelectedLeagueId('');
+      //  setSelectedRuleId('');
+      //  setSelectedRule(null);
+      //}
+
+      const cur = selectedLeagueIdRef.current;
+
+      if (cur && cur !== NEW_LEAGUE && !data.some((x) => x.id === cur)) {
+        selectedLeagueIdRef.current = '';
         setSelectedLeagueId('');
         setSelectedRuleId('');
         setSelectedRule(null);
@@ -327,8 +338,10 @@ export default function LeaguesPage() {
 
       return data;
     },
-    [selectedLeagueId],
+    //[selectedLeagueId],
+    [],
   );
+
 
   useEffect(() => {
     if (!token) return;
@@ -389,6 +402,10 @@ export default function LeaguesPage() {
     })();
   }, [token, selectedRuleId]);
 
+  useEffect(() => {
+    selectedLeagueIdRef.current = selectedLeagueId;
+  }, [selectedLeagueId]);
+
   const selectedLeague = useMemo(() => {
     return leagues.find((l) => l.id === selectedLeagueId) as LeagueLike | undefined;
   }, [leagues, selectedLeagueId]);
@@ -448,14 +465,14 @@ export default function LeaguesPage() {
 
       selectedLeague: selectedLeague
         ? {
-            id: selectedLeague.id,
-            name: selectedLeague.name,
-            joinCode: selectedLeague.joinCode ?? null,
-            joinPolicy: selectedLeague.joinPolicy ?? null,
-            scoringRuleId: selectedLeague.scoringRuleId ?? null,
-            seasonId: selectedLeague.seasonId ?? null,
-            myRole: selectedLeague.myRole ?? myLeagueRole ?? null,
-          }
+          id: selectedLeague.id,
+          name: selectedLeague.name,
+          joinCode: selectedLeague.joinCode ?? null,
+          joinPolicy: selectedLeague.joinPolicy ?? null,
+          scoringRuleId: selectedLeague.scoringRuleId ?? null,
+          seasonId: selectedLeague.seasonId ?? null,
+          myRole: selectedLeague.myRole ?? myLeagueRole ?? null,
+        }
         : null,
 
       // estado creación/entrada (útil para el bot)
@@ -512,9 +529,9 @@ export default function LeaguesPage() {
         const conceptRows = (await getSeasonConcepts(token, selectedSeasonFilterId)) as unknown;
         const rows: SeasonConceptRow[] = Array.isArray(conceptRows)
           ? (conceptRows.filter(isRecord).map((x) => ({
-              code: typeof x.code === 'string' ? x.code : '',
-              label: typeof x.label === 'string' ? x.label : null,
-            })) as SeasonConceptRow[])
+            code: typeof x.code === 'string' ? x.code : '',
+            label: typeof x.label === 'string' ? x.label : null,
+          })) as SeasonConceptRow[])
           : [];
 
         const nextConcepts = rows
@@ -1085,8 +1102,12 @@ export default function LeaguesPage() {
               <select
                 value={selectedLeagueId}
                 onChange={(e) => {
+                  //const v = e.target.value;
+
+                  //setSelectedLeagueId(v);
                   const v = e.target.value;
 
+                  selectedLeagueIdRef.current = v;
                   setSelectedLeagueId(v);
                   setInfo(null);
                   setError(null);
