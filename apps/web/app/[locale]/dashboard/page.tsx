@@ -489,21 +489,27 @@ export default function DashboardPage() {
                 <div className="mt-2 text-2xl font-semibold">{leaguesInActiveSeason.length}</div>
                 <div className="mt-1 text-sm text-[color:var(--muted)]">en este evento</div>
                 <div className="mt-3">
-                  <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/leagues`)}>
-                    Ir a Ligas
+                  <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/leagues?view=my`)}>
+                    Ir a mis ligas
                   </Button>
                 </div>
               </Card>
 
               <Card className="p-4">
-                <div className="text-xs uppercase tracking-wide text-[color:var(--muted)]">Próximos partidos</div>
-                <div className="mt-2 text-2xl font-semibold">{upcomingMatches.length}</div>
-                <div className="mt-1 text-sm text-[color:var(--muted)]">en agenda</div>
-                <div className="mt-3">
-                  <Button variant="secondary" size="sm" onClick={() => router.push(`/${locale}/matches`)}>
-                    Ver Partidos
-                  </Button>
-                </div>
+                <div className="text-xs uppercase tracking-wide text-[color:var(--muted)]">Resumen del evento</div>
+
+                <div className="mt-2 text-2xl font-semibold leading-tight">Grupos</div>
+
+                <div className="mt-1 text-sm text-[color:var(--muted)]">Posiciones y clasificados</div>
+
+                <Button
+                  className="mt-4 w-fit justify-start"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => router.push(`/${locale}/summary`)}
+                >
+                  Ir a resumen
+                </Button>
               </Card>
 
               <Card className="p-4 md:col-span-2">
