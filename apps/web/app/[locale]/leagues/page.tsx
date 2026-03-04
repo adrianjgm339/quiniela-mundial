@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   getMyLeagues,
   joinLeagueByCode,
@@ -175,7 +175,9 @@ function isJoinPolicy(v: string): v is JoinPolicy {
 
 export default function LeaguesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { locale } = useParams<{ locale: string }>();
+  const onlyMyLeaguesView = searchParams.get('view') === 'my';
 
   const [token, setToken] = useState<string | null>(null);
 
@@ -199,7 +201,6 @@ export default function LeaguesPage() {
   const [loadingRules, setLoadingRules] = useState(false);
 
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>(''); // '' = "Seleccionar"
-  const selectedLeagueIdRef = useRef<string>('');
   const [selectedRuleId, setSelectedRuleId] = useState<string>(''); // '' = sin regla seleccionada
   const [selectedRule, setSelectedRule] = useState<ApiScoringRule | null>(null);
   const [loadingRuleDetails, setLoadingRuleDetails] = useState(false);
@@ -317,20 +318,10 @@ export default function LeaguesPage() {
       setLeagues(data);
 
       // No auto-seleccionamos nada: dejamos "Seleccionar" por defecto
-      //if (selectedLeagueId === NEW_LEAGUE) return data;
-      if (selectedLeagueIdRef.current === NEW_LEAGUE) return data;
+      if (selectedLeagueId === NEW_LEAGUE) return data;
 
       // si la liga seleccionada ya no existe, limpiar selección
-      //if (selectedLeagueId && !data.some((x) => x.id === selectedLeagueId)) {
-      //  setSelectedLeagueId('');
-      //  setSelectedRuleId('');
-      //  setSelectedRule(null);
-      //}
-
-      const cur = selectedLeagueIdRef.current;
-
-      if (cur && cur !== NEW_LEAGUE && !data.some((x) => x.id === cur)) {
-        selectedLeagueIdRef.current = '';
+      if (selectedLeagueId && !data.some((x) => x.id === selectedLeagueId)) {
         setSelectedLeagueId('');
         setSelectedRuleId('');
         setSelectedRule(null);
@@ -338,10 +329,8 @@ export default function LeaguesPage() {
 
       return data;
     },
-    //[selectedLeagueId],
-    [],
+    [selectedLeagueId],
   );
-
 
   useEffect(() => {
     if (!token) return;
@@ -401,10 +390,6 @@ export default function LeaguesPage() {
       }
     })();
   }, [token, selectedRuleId]);
-
-  useEffect(() => {
-    selectedLeagueIdRef.current = selectedLeagueId;
-  }, [selectedLeagueId]);
 
   const selectedLeague = useMemo(() => {
     return leagues.find((l) => l.id === selectedLeagueId) as LeagueLike | undefined;
@@ -987,297 +972,286 @@ export default function LeaguesPage() {
         )}
 
         {/* Gestión de ligas (unificado) */}
-        <Card className="p-5">
-          <div className="text-lg font-semibold">Gestionar ligas</div>
-          <div className="text-sm text-[color:var(--muted)] mt-1">
-            Unirte por código o seleccionar/crear liga y definir su regla.
-          </div>
-
-          {/* Unirse por código */}
-          <div className="mt-4">
-            <div className="text-sm text-[color:var(--muted)] mb-1">Unirse por código</div>
-            <div className="flex flex-wrap gap-2">
-              <input
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value)}
-                placeholder="Código (ej: ABC123)"
-                className="flex-1 min-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)] disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-              <Button onClick={onJoin} disabled={joining || !joinCode.trim()}>
-                {joining ? 'Uniéndome…' : 'Unirme'}
-              </Button>
-            </div>
-          </div>
-
-          <div className="my-5 h-px bg-[var(--border)]" />
-
-          {/* Filtros: Deporte -> Competición -> Evento */}
-          <div className="grid md:grid-cols-3 gap-4">
-            {/* Deporte */}
-            <div>
-              <div className="text-sm text-[color:var(--muted)] mb-1">Deporte</div>
-              <select
-                value={selectedSportId}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSelectedSportId(v);
-                  // reset cascada
-                  setSelectedCompetitionId('');
-                  setSelectedSeasonFilterId('');
-                }}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
-              >
-                <option value="">Seleccionar</option>
-                {sportOptions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+        {!onlyMyLeaguesView && (
+          <Card className="p-5">
+            <div className="text-lg font-semibold">Gestionar ligas</div>
+            <div className="text-sm text-[color:var(--muted)] mt-1">
+              Unirte por código o seleccionar/crear liga y definir su regla.
             </div>
 
-            {/* Competición */}
-            <div>
-              <div className="text-sm text-[color:var(--muted)] mb-1">Competición</div>
-              <select
-                value={selectedCompetitionId}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSelectedCompetitionId(v);
-                  // reset cascada
-                  setSelectedSeasonFilterId('');
-                }}
-                disabled={!selectedSportId}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
-              >
-                <option value="">Seleccionar</option>
-                {competitionOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+            {/* Unirse por código */}
+            <div className="mt-4">
+              <div className="text-sm text-[color:var(--muted)] mb-1">Unirse por código</div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  placeholder="Código (ej: ABC123)"
+                  className="flex-1 min-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)] disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                <Button onClick={onJoin} disabled={joining || !joinCode.trim()}>
+                  {joining ? 'Uniéndome…' : 'Unirme'}
+                </Button>
+              </div>
             </div>
 
-            {/* Evento */}
-            <div>
-              <div className="text-sm text-[color:var(--muted)] mb-1">Evento</div>
-              <select
-                value={selectedSeasonFilterId}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSelectedSeasonFilterId(v);
+            <div className="my-5 h-px bg-[var(--border)]" />
 
-                  // UI inmediata: el texto visible del option seleccionado
-                  const txt = e.target.selectedOptions?.[0]?.textContent?.trim();
-                  if (txt) setActiveSeasonNameLabel(txt.replace(/\s*\(.*\)\s*$/, '')); // quita "(slug)" si viene
-                }}
-                disabled={!selectedCompetitionId}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
-              >
-                <option value="">Seleccionar</option>
-                {seasonOptions.map((se) => (
-                  <option key={se.id} value={se.id}>
-                    {se.name} ({se.slug})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Hint */}
-          {!filtersReady && (
-            <div className="mt-3 text-sm text-[color:var(--muted)]">
-              Selecciona <b>Deporte</b>, <b>Competición</b> y <b>Evento</b> para habilitar la selección de liga.
-            </div>
-          )}
-
-          <div className="my-5 h-px bg-[var(--border)]" />
-
-          {/* Selección/creación de liga + reglas */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Liga */}
-            <div>
-              <div className="text-sm text-[color:var(--muted)] mb-1">Liga</div>
-              <select
-                value={selectedLeagueId}
-                onChange={(e) => {
-                  //const v = e.target.value;
-
-                  //setSelectedLeagueId(v);
-                  const v = e.target.value;
-
-                  selectedLeagueIdRef.current = v;
-                  setSelectedLeagueId(v);
-                  setInfo(null);
-                  setError(null);
-
-                  if (v === NEW_LEAGUE) {
-                    setNewRuleMode('PREDEFINED');
-                    setNewLeagueName('');
-                    setCustomRuleName('');
-                    setCustomPoints(makePointsRecord(concepts));
-
-                    setSelectedRuleId('');
-                    setSelectedRule(null);
-                  } else if (v === '') {
-                    setSelectedRuleId('');
-                    setSelectedRule(null);
-                  } else {
-                    const found = leagues.find((x) => x.id === v) as LeagueLike | undefined;
-                    setSelectedRuleId(found?.scoringRuleId ?? '');
-                  }
-                }}
-                disabled={!filtersReady}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
-              >
-                <option value="">Seleccionar</option>
-                <option value={NEW_LEAGUE}>(CREAR NUEVA LIGA)</option>
-                {leaguesByEvent.map((l) => {
-                  const league = l as LeagueLike;
-                  return (
-                    <option key={league.id} value={league.id}>
-                      {league.name} [{joinPolicyLabel(league.joinPolicy ?? undefined)}]{' '}
-                      {league.myRole ? `(${league.myRole})` : ''}
-                    </option>
-                  );
-                })}
-              </select>
-
-              {selectedLeagueId === NEW_LEAGUE && (
-                <div className="mt-3">
-                  <div className="text-sm text-[color:var(--muted)] mb-1">Nombre de la nueva liga</div>
-                  <input
-                    value={newLeagueName}
-                    onChange={(e) => setNewLeagueName(e.target.value)}
-                    placeholder="Ej: Liga de la Oficina"
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
-                  />
-                  <div className="mt-3">
-                    <div className="text-sm text-[color:var(--muted)] mb-1">Tipo de liga</div>
-                    <select
-                      value={newJoinPolicy}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (isJoinPolicy(v)) setNewJoinPolicy(v);
-                      }}
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
-                    >
-                      <option value="PRIVATE">Privada (solo con código)</option>
-                      <option value="PUBLIC">Pública (cualquiera puede unirse)</option>
-                      <option value="APPROVAL">Con aprobación (solicitud)</option>
-                    </select>
-
-                    <div className="mt-2 text-xs text-zinc-500">
-                      Privada: requiere código · Pública: aparece en listado · Con aprobación: aparece y solicita al admin.
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {selectedLeagueId === '' && (
-                <div className="mt-3 text-sm text-[color:var(--muted)]">
-                  Selecciona una liga para ver su regla, o elige <b>(CREAR NUEVA LIGA)</b>.
-                </div>
-              )}
-            </div>
-
-            {/* Regla */}
-            <div>
-              <div className="text-sm text-[color:var(--muted)] mb-1">Regla</div>
-
-              {selectedLeagueId === NEW_LEAGUE && (
-                <div className="mb-3 flex gap-2">
-                  <Button
-                    size="sm"
-                    variant={newRuleMode === 'PREDEFINED' ? 'primary' : 'outline'}
-                    onClick={() => setNewRuleMode('PREDEFINED')}
-                  >
-                    Predefinida
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    variant={newRuleMode === 'CUSTOM' ? 'primary' : 'outline'}
-                    onClick={() => setNewRuleMode('CUSTOM')}
-                  >
-                    Personalizada
-                  </Button>
-                </div>
-              )}
-
-              {/* Predefinida (nuevo o existente) */}
-              {(selectedLeagueId !== NEW_LEAGUE || newRuleMode === 'PREDEFINED') && (
+            {/* Filtros: Deporte -> Competición -> Evento */}
+            <div className="grid md:grid-cols-3 gap-4">
+              {/* Deporte */}
+              <div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Deporte</div>
                 <select
-                  value={selectedRuleId}
-                  onChange={(e) => setSelectedRuleId(e.target.value)}
-                  disabled={!filtersReady || !selectedLeagueId || selectedLeagueId === '' || loadingRules}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
+                  value={selectedSportId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedSportId(v);
+                    // reset cascada
+                    setSelectedCompetitionId('');
+                    setSelectedSeasonFilterId('');
+                  }}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
                 >
-                  <option value="">{loadingRules ? 'Cargando reglas…' : '— Selecciona una regla —'}</option>
-                  {ruleOptionsForSelect.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
+                  <option value="">Seleccionar</option>
+                  {sportOptions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
                     </option>
                   ))}
                 </select>
-              )}
+              </div>
 
-              {/* Personalizada (solo UI por ahora) */}
-              {selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && (
-                <Card className="p-3">
-                  <div className="text-xs text-[color:var(--muted)] mb-2">
-                    Regla personalizada por liga. Los conceptos y validaciones dependen del evento seleccionado.
-                  </div>
+              {/* Competición */}
+              <div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Competición</div>
+                <select
+                  value={selectedCompetitionId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedCompetitionId(v);
+                    // reset cascada
+                    setSelectedSeasonFilterId('');
+                  }}
+                  disabled={!selectedSportId}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
+                >
+                  <option value="">Seleccionar</option>
+                  {competitionOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                  <div className="text-sm text-[color:var(--muted)] mb-1">Nombre de la regla personalizada</div>
-                  <input
-                    value={customRuleName}
-                    onChange={(e) => setCustomRuleName(e.target.value)}
-                    placeholder="Ej: Mi regla pro"
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
-                  />
+              {/* Evento */}
+              <div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Evento</div>
+                <select
+                  value={selectedSeasonFilterId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedSeasonFilterId(v);
 
-                  <div className="mt-3 text-sm text-[color:var(--muted)] mb-2">Puntos por concepto</div>
-                  <div className="space-y-2">
-                    {concepts.map((c) => (
-                      <div key={c.code} className="flex items-center justify-between gap-3">
-                        <div className="text-sm text-[var(--foreground)]">{c.label}</div>
-                        <input
-                          value={customPoints[c.code] ?? '0'}
-                          onChange={(e) => setCustomPoints((prev) => ({ ...prev, [c.code]: e.target.value }))}
-                          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-right text-[var(--foreground)]"
-                          inputMode="numeric"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
+                    // UI inmediata: el texto visible del option seleccionado
+                    const txt = e.target.selectedOptions?.[0]?.textContent?.trim();
+                    if (txt) setActiveSeasonNameLabel(txt.replace(/\s*\(.*\)\s*$/, '')); // quita "(slug)" si viene
+                  }}
+                  disabled={!selectedCompetitionId}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
+                >
+                  <option value="">Seleccionar</option>
+                  {seasonOptions.map((se) => (
+                    <option key={se.id} value={se.id}>
+                      {se.name} ({se.slug})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* Detalle de regla (si hay seleccionada predefinida) */}
-          {selectedLeagueId &&
-            selectedLeagueId !== '' &&
-            (selectedLeagueId !== NEW_LEAGUE || newRuleMode === 'PREDEFINED') && (
-              <Card className="mt-5 p-3">
-                <div className="text-sm font-semibold">Desglose</div>
-                <div className="text-xs text-[color:var(--muted)] mt-1">
-                  {loadingRuleDetails ? 'Cargando detalle…' : selectedRule ? selectedRule.name : '—'}
-                </div>
+            {/* Hint */}
+            {!filtersReady && (
+              <div className="mt-3 text-sm text-[color:var(--muted)]">
+                Selecciona <b>Deporte</b>, <b>Competición</b> y <b>Evento</b> para habilitar la selección de liga.
+              </div>
+            )}
 
-                <div className="mt-3">
-                  {/* Header columna puntos */}
-                  <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
-                    <div>&nbsp;</div>
-                    <div className="w-24 text-right font-semibold">Pts</div>
+            <div className="my-5 h-px bg-[var(--border)]" />
+
+            {/* Selección/creación de liga + reglas */}
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Liga */}
+              <div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Liga</div>
+                <select
+                  value={selectedLeagueId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+
+                    setSelectedLeagueId(v);
+                    setInfo(null);
+                    setError(null);
+
+                    if (v === NEW_LEAGUE) {
+                      setNewRuleMode('PREDEFINED');
+                      setNewLeagueName('');
+                      setCustomRuleName('');
+                      setCustomPoints(makePointsRecord(concepts));
+
+                      setSelectedRuleId('');
+                      setSelectedRule(null);
+                    } else if (v === '') {
+                      setSelectedRuleId('');
+                      setSelectedRule(null);
+                    } else {
+                      const found = leagues.find((x) => x.id === v) as LeagueLike | undefined;
+                      setSelectedRuleId(found?.scoringRuleId ?? '');
+                    }
+                  }}
+                  disabled={!filtersReady}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
+                >
+                  <option value="">Seleccionar</option>
+                  <option value={NEW_LEAGUE}>(CREAR NUEVA LIGA)</option>
+                  {leaguesByEvent.map((l) => {
+                    const league = l as LeagueLike;
+                    return (
+                      <option key={league.id} value={league.id}>
+                        {league.name} [{joinPolicyLabel(league.joinPolicy ?? undefined)}]{' '}
+                        {league.myRole ? `(${league.myRole})` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+
+                {selectedLeagueId === NEW_LEAGUE && (
+                  <div className="mt-3">
+                    <div className="text-sm text-[color:var(--muted)] mb-1">Nombre de la nueva liga</div>
+                    <input
+                      value={newLeagueName}
+                      onChange={(e) => setNewLeagueName(e.target.value)}
+                      placeholder="Ej: Liga de la Oficina"
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
+                    />
+                    <div className="mt-3">
+                      <div className="text-sm text-[color:var(--muted)] mb-1">Tipo de liga</div>
+                      <select
+                        value={newJoinPolicy}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (isJoinPolicy(v)) setNewJoinPolicy(v);
+                        }}
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
+                      >
+                        <option value="PRIVATE">Privada (solo con código)</option>
+                        <option value="PUBLIC">Pública (cualquiera puede unirse)</option>
+                        <option value="APPROVAL">Con aprobación (solicitud)</option>
+                      </select>
+
+                      <div className="mt-2 text-xs text-zinc-500">
+                        Privada: requiere código · Pública: aparece en listado · Con aprobación: aparece y solicita al admin.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedLeagueId === '' && (
+                  <div className="mt-3 text-sm text-[color:var(--muted)]">
+                    Selecciona una liga para ver su regla, o elige <b>(CREAR NUEVA LIGA)</b>.
+                  </div>
+                )}
+              </div>
+
+              {/* Regla */}
+              <div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Regla</div>
+
+                {selectedLeagueId === NEW_LEAGUE && (
+                  <div className="mb-3 flex gap-2">
+                    <Button
+                      size="sm"
+                      variant={newRuleMode === 'PREDEFINED' ? 'primary' : 'outline'}
+                      onClick={() => setNewRuleMode('PREDEFINED')}
+                    >
+                      Predefinida
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant={newRuleMode === 'CUSTOM' ? 'primary' : 'outline'}
+                      onClick={() => setNewRuleMode('CUSTOM')}
+                    >
+                      Personalizada
+                    </Button>
+                  </div>
+                )}
+
+                {/* Predefinida (nuevo o existente) */}
+                {(selectedLeagueId !== NEW_LEAGUE || newRuleMode === 'PREDEFINED') && (
+                  <select
+                    value={selectedRuleId}
+                    onChange={(e) => setSelectedRuleId(e.target.value)}
+                    disabled={!filtersReady || !selectedLeagueId || selectedLeagueId === '' || loadingRules}
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
+                  >
+                    <option value="">{loadingRules ? 'Cargando reglas…' : '— Selecciona una regla —'}</option>
+                    {ruleOptionsForSelect.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {/* Personalizada (solo UI por ahora) */}
+                {selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && (
+                  <Card className="p-3">
+                    <div className="text-xs text-[color:var(--muted)] mb-2">
+                      Regla personalizada por liga. Los conceptos y validaciones dependen del evento seleccionado.
+                    </div>
+
+                    <div className="text-sm text-[color:var(--muted)] mb-1">Nombre de la regla personalizada</div>
+                    <input
+                      value={customRuleName}
+                      onChange={(e) => setCustomRuleName(e.target.value)}
+                      placeholder="Ej: Mi regla pro"
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
+                    />
+
+                    <div className="mt-3 text-sm text-[color:var(--muted)] mb-2">Puntos por concepto</div>
+                    <div className="space-y-2">
+                      {concepts.map((c) => (
+                        <div key={c.code} className="flex items-center justify-between gap-3">
+                          <div className="text-sm text-[var(--foreground)]">{c.label}</div>
+                          <input
+                            value={customPoints[c.code] ?? '0'}
+                            onChange={(e) => setCustomPoints((prev) => ({ ...prev, [c.code]: e.target.value }))}
+                            className="w-24 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-right text-[var(--foreground)]"
+                            inputMode="numeric"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </div>
+            </div>
+
+            {/* Detalle de regla (si hay seleccionada predefinida) */}
+            {selectedLeagueId &&
+              selectedLeagueId !== '' &&
+              (selectedLeagueId !== NEW_LEAGUE || newRuleMode === 'PREDEFINED') && (
+                <Card className="mt-5 p-3">
+                  <div className="text-sm font-semibold">Desglose</div>
+                  <div className="text-xs text-[color:var(--muted)] mt-1">
+                    {loadingRuleDetails ? 'Cargando detalle…' : selectedRule ? selectedRule.name : '—'}
                   </div>
 
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-3 space-y-2">
                     {concepts.map((c) => {
-                      const pts =
-                        selectedRule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
+                      const pts = selectedRule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
                       return (
                         <div key={c.code} className="flex items-center justify-between">
                           <div className="text-sm text-[var(--foreground)]">{c.label}</div>
@@ -1295,44 +1269,44 @@ export default function LeaguesPage() {
                       );
                     })}
                   </div>
-                </div>
-              </Card>
-            )}
+                </Card>
+              )}
 
-          {/* Guardar */}
-          <div className="mt-5 flex flex-wrap gap-2 items-center">
-            {(() => {
-              const saveDisabled =
-                savingLeagueRule ||
-                !filtersReady ||
-                !eventSelected ||
-                !selectedLeagueId ||
-                selectedLeagueId === '' ||
-                // ✅ liga existente: si NO eres OWNER/ADMIN de la liga, deshabilitar
-                (selectedLeagueId !== NEW_LEAGUE && !canSaveLeagueRule) ||
-                // crear nueva liga: requiere nombre
-                (selectedLeagueId === NEW_LEAGUE && !newLeagueName.trim()) ||
-                // liga existente requiere regla
-                (selectedLeagueId !== '' && selectedLeagueId !== NEW_LEAGUE && !selectedRuleId) ||
-                // crear nueva con predefinida requiere regla
-                (selectedLeagueId === NEW_LEAGUE && newRuleMode === 'PREDEFINED' && !selectedRuleId) ||
-                // crear nueva con personalizada requiere nombre de regla
-                (selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && !customRuleName.trim());
+            {/* Guardar */}
+            <div className="mt-5 flex flex-wrap gap-2 items-center">
+              {(() => {
+                const saveDisabled =
+                  savingLeagueRule ||
+                  !filtersReady ||
+                  !eventSelected ||
+                  !selectedLeagueId ||
+                  selectedLeagueId === '' ||
+                  // ✅ liga existente: si NO eres OWNER/ADMIN de la liga, deshabilitar
+                  (selectedLeagueId !== NEW_LEAGUE && !canSaveLeagueRule) ||
+                  // crear nueva liga: requiere nombre
+                  (selectedLeagueId === NEW_LEAGUE && !newLeagueName.trim()) ||
+                  // liga existente requiere regla
+                  (selectedLeagueId !== '' && selectedLeagueId !== NEW_LEAGUE && !selectedRuleId) ||
+                  // crear nueva con predefinida requiere regla
+                  (selectedLeagueId === NEW_LEAGUE && newRuleMode === 'PREDEFINED' && !selectedRuleId) ||
+                  // crear nueva con personalizada requiere nombre de regla
+                  (selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && !customRuleName.trim());
 
-              return (
-                <>
-                  <Button onClick={onSaveLeagueRule} disabled={saveDisabled}>
-                    {savingLeagueRule ? 'Guardando…' : 'Guardar Liga/Regla'}
-                  </Button>
+                return (
+                  <>
+                    <Button onClick={onSaveLeagueRule} disabled={saveDisabled}>
+                      {savingLeagueRule ? 'Guardando…' : 'Guardar Liga/Regla'}
+                    </Button>
 
-                  {selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && (
-                    <div className="text-sm text-amber-200"></div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        </Card>
+                    {selectedLeagueId === NEW_LEAGUE && newRuleMode === 'CUSTOM' && (
+                      <div className="text-sm text-amber-200"></div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </Card>
+        )}
 
         {/* Mis ligas */}
         <Card className="overflow-hidden">
@@ -1359,9 +1333,9 @@ export default function LeaguesPage() {
                         <Badge>{joinPolicyLabel(league.joinPolicy ?? undefined)}</Badge>
                       </div>
                       <div className="text-sm text-[color:var(--muted)]">
-                        Código: <span className="font-medium text-[var(--foreground)]">{league.joinCode}</span>
+                        Código: <span className="text-zinc-200">{league.joinCode}</span>
                         {' · '}
-                        Regla: <span className="font-medium text-[var(--foreground)]">{league.scoringRuleId ?? '—'}</span>
+                        Regla: <span className="text-zinc-200">{league.scoringRuleId ?? '—'}</span>
                       </div>
                     </div>
 
