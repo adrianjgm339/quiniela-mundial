@@ -237,6 +237,17 @@ export default function DashboardPage() {
     return s.replace(/\p{L}[\p{L}\p{M}'’\-]*/gu, (w) => w.charAt(0).toUpperCase() + w.slice(1));
   }
 
+  const activeSeasonTitle = useMemo(() => {
+    const n = (activeSeason?.name ?? "").trim();
+    if (n) return n;
+
+    const slug = (activeSeason as unknown as { slug?: string | null })?.slug ?? "";
+    const s = slug.trim();
+    if (!s) return "No seleccionado";
+
+    return toTitleCase(s.replace(/-/g, " "));
+  }, [activeSeason, toTitleCase]);
+
   function parseTs(iso?: string | null) {
     if (!iso) return null;
     const t = Date.parse(iso);
@@ -465,7 +476,7 @@ export default function DashboardPage() {
 
               <div className="mt-2 flex items-center gap-2 flex-wrap">
                 <div className="text-xl font-semibold text-[color:var(--accent)]">
-                  {activeSeason?.name ?? "No seleccionado"}
+                  {activeSeasonTitle}
                 </div>
 
                 {activeSeason?.id ? (
