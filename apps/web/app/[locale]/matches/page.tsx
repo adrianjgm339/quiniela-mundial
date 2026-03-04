@@ -166,6 +166,11 @@ export default function MatchesPage() {
     return c?.seasons ?? [];
   }, [competitionOptions, competitionId]);
 
+  const isBaseballContext = useMemo(() => {
+    const name = (catalog.find((s) => s.id === sportId)?.name ?? '').toLowerCase();
+    return name.includes('beisbol') || name.includes('béisbol');
+  }, [catalog, sportId]);
+
   const inferSportCompetitionFromSeason = useCallback((sid: string, cat: CatalogSport[]) => {
     if (!sid) return { sportId: '', competitionId: '' };
 
@@ -552,6 +557,11 @@ export default function MatchesPage() {
     const isKO = !!phaseCode && phaseCode !== 'F01';
     const isTie = hp === ap;
 
+    if (isBaseballContext && isTie) {
+      setSaveError('Béisbol: no se permite empate. Ajusta el marcador (debe existir ganador).');
+      return;
+    }
+
     if (isKO && isTie && !koWinnerTeamId) {
       setSaveError('KO: Como pronosticaste empate, debes indicar quién avanza (Local o Visitante).');
       return;
@@ -609,13 +619,13 @@ export default function MatchesPage() {
       activeLeague: activeLeague ? { id: activeLeague.id, name: activeLeague.name, joinCode: activeLeague.joinCode } : null,
       selectedMatch: sel
         ? {
-            id: sel.id,
-            home: sel.homeTeam?.name ?? '',
-            away: sel.awayTeam?.name ?? '',
-            timeUtc: sel.timeUtc ?? null,
-            utcDateTime: sel.utcDateTime ?? null,
-            closeUtc: sel.closeUtc ?? null,
-          }
+          id: sel.id,
+          home: sel.homeTeam?.name ?? '',
+          away: sel.awayTeam?.name ?? '',
+          timeUtc: sel.timeUtc ?? null,
+          utcDateTime: sel.utcDateTime ?? null,
+          closeUtc: sel.closeUtc ?? null,
+        }
         : null,
     };
   }, [activeLeague, competitionId, effectiveLeagueId, group, locale, phase, seasonId, selected, sportId, token]);
