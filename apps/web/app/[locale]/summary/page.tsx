@@ -298,6 +298,47 @@ export default function EventSummaryPage() {
         return gs.filter((g) => safeText(g.groupCode, "") === groupFilter);
     }, [standings, groupFilter]);
 
+    const isWbc = useMemo(() => {
+        const m = (standings?.meta ?? null) as AnyObj | null;
+        return String(m?.groupRankingMode ?? "").toUpperCase() === "WBC";
+    }, [standings]);
+
+    const fmtPct = (n: number) => {
+        if (!Number.isFinite(n)) return "0.000";
+        return n.toFixed(3);
+    };
+
+    const winPct = (r: AnyObj) => {
+        const w = Number(r?.won ?? 0);
+        const l = Number(r?.lost ?? 0);
+        const den = w + l;
+        return den > 0 ? w / den : 0;
+    };
+
+    const columns = useMemo(() => {
+        if (isWbc) {
+            return [
+                { key: "played", label: "PJ" },
+                { key: "won", label: "W" },
+                { key: "lost", label: "L" },
+                { key: "gf", label: "RS" }, // runs scored
+                { key: "ga", label: "RA" }, // runs allowed
+                { key: "winPct", label: "W%" },
+            ] as const;
+        }
+
+        return [
+            { key: "played", label: "PJ" },
+            { key: "won", label: "G" },
+            { key: "drawn", label: "E" },
+            { key: "lost", label: "P" },
+            { key: "gf", label: "GF" },
+            { key: "ga", label: "GC" },
+            { key: "gd", label: "DG" },
+            { key: "points", label: "Pts" },
+        ] as const;
+    }, [isWbc]);
+
     return (
         <div className="min-h-screen">
             <div className="mx-auto max-w-[980px] px-4 pb-12 pt-10 space-y-6">
@@ -422,14 +463,14 @@ export default function EventSummaryPage() {
                                                 <tr className={trHead}>
                                                     <th className={thBase}>Pos</th>
                                                     <th className={thBase}>Equipo</th>
-                                                    <th className={`${thBase} text-right`}>PJ</th>
-                                                    <th className={`${thBase} text-right`}>G</th>
-                                                    <th className={`${thBase} text-right`}>E</th>
-                                                    <th className={`${thBase} text-right`}>P</th>
-                                                    <th className={`${thBase} text-right`}>GF</th>
-                                                    <th className={`${thBase} text-right`}>GC</th>
-                                                    <th className={`${thBase} text-right`}>DG</th>
-                                                    <th className={`${thBase} text-right`}>Pts</th>
+
+                                                    {columns.map((c) => (
+                                                        <th key={c.key} className={`${thBase} text-right`}>
+                                                            {c.label}
+                                                        </th>
+                                                    ))}
+
+                                                    <th className={`${thBase} text-right`}>Manual</th>
                                                 </tr>
                                             </thead>
 
@@ -451,14 +492,25 @@ export default function EventSummaryPage() {
                                                     const needsManual = Boolean((r as AnyObj)?.needsManual);
 
                                                     const pos = Number(r.posGroup ?? r.pos ?? idx + 1);
-                                                    const pj = Number(r.pj ?? r.played ?? 0);
-                                                    const gW = Number(r.w ?? r.g ?? r.wins ?? 0);
-                                                    const eD = Number(r.d ?? r.e ?? r.draws ?? 0);
-                                                    const pL = Number(r.l ?? r.p ?? r.losses ?? 0);
-                                                    const gf = Number(r.gf ?? r.goalsFor ?? 0);
-                                                    const gc = Number(r.gc ?? r.goalsAgainst ?? 0);
-                                                    const dg = Number(r.dg ?? r.diff ?? gf - gc);
-                                                    const pts = Number(r.pts ?? r.points ?? 0);
+
+                                                    const getVal = (key: string): unknown => {
+                                                        if (key === "winPct") return fmtPct(winPct(r));
+
+                                                        if (key === "played") return r.played ?? r.pj ?? r.PJ ?? 0;
+                                                        if (key === "won") return r.won ?? r.w ?? r.g ?? r.W ?? 0;
+                                                        if (key === "drawn") return r.drawn ?? r.d ?? r.e ?? 0;
+                                                        if (key === "lost") return r.lost ?? r.l ?? r.p ?? r.L ?? 0;
+
+                                                        // stats
+                                                        if (key === "gf") return r.gf ?? r.RS ?? 0;
+                                                        if (key === "ga") return r.ga ?? r.gc ?? r.RA ?? 0;
+                                                        if (key === "gd") return r.gd ?? r.dg ?? 0;
+                                                        if (key === "points") return r.points ?? r.pts ?? 0;
+
+                                                        return (r as AnyObj)?.[key];
+                                                    };
+
+                                                    const manualTxt = r.manualOverride ? "override" : r.manualReason ? "override" : "";
 
                                                     return (
                                                         <tr key={`${code}-${idx}`} className="hover:bg-[var(--muted)]">
@@ -494,14 +546,15 @@ export default function EventSummaryPage() {
                                                                 </div>
                                                             </td>
 
-                                                            <td className={`${tdBase} text-right`}>{pj}</td>
-                                                            <td className={`${tdBase} text-right`}>{gW}</td>
-                                                            <td className={`${tdBase} text-right`}>{eD}</td>
-                                                            <td className={`${tdBase} text-right`}>{pL}</td>
-                                                            <td className={`${tdBase} text-right`}>{gf}</td>
-                                                            <td className={`${tdBase} text-right`}>{gc}</td>
-                                                            <td className={`${tdBase} text-right`}>{dg}</td>
-                                                            <td className={`${tdBase} text-right font-semibold`}>{pts}</td>
+                                                            {columns.map((c) => (
+                                                                <td key={c.key} className={`${tdBase} text-right`}>
+                                                                    {safeText(getVal(c.key), "")}
+                                                                </td>
+                                                            ))}
+
+                                                            <td className={`${tdBase} text-right`}>
+                                                                <span style={{ opacity: 0.8 }}>{manualTxt}</span>
+                                                            </td>
                                                         </tr>
                                                     );
                                                 })}
