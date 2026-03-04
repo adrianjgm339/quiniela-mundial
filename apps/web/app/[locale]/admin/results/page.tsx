@@ -61,7 +61,13 @@ function inferSportCompetitionFromSeason(cat: CatalogSport[], seasonId: string) 
   return { sportId: '', competitionId: '' };
 }
 
-const API_URL = 'http://localhost:3001';
+const RAW_API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://localhost:3001';
+
+const API_URL = RAW_API_BASE.replace(/\/+$/, '');
 
 // (PRO) Tokens helpers (los vamos a usar)
 const controlBase =
