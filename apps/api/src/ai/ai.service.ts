@@ -52,9 +52,12 @@ export class AiService {
 
     // OPENAI
     if (!this.openai) {
-      throw new ServiceUnavailableException(
-        'IA no configurada en el servidor (falta OPENAI_API_KEY).',
-      );
+      return {
+        reply:
+          dto?.locale?.startsWith('en')
+            ? 'AI assistant will be available soon. 🙌'
+            : 'El asistente virtual de IA estará disponible próximamente. 🙌',
+      };
     }
 
     return { reply: await this.openaiReply(dto) };
