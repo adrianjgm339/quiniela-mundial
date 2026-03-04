@@ -113,14 +113,14 @@ export function AiChatWidget(props: AiChatWidgetProps) {
       </button>
 
       {open && (
-        <div className="fixed bottom-20 right-5 z-40 w-[min(420px,calc(100vw-40px))] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+        <div className="fixed bottom-20 right-5 z-40 w-[min(420px,calc(100vw-40px))] rounded-2xl border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] shadow-2xl">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
             <div className="font-semibold">
               {locale?.startsWith('es') ? 'Asistente IA' : 'AI Assistant'}
             </div>
             <button
               onClick={() => setOpen(false)}
-              className="rounded-lg bg-zinc-800 px-3 py-1 hover:bg-zinc-700"
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1 text-[var(--foreground)] hover:bg-[color:var(--muted)]"
             >
               X
             </button>
@@ -133,7 +133,7 @@ export function AiChatWidget(props: AiChatWidgetProps) {
                 className={
                   m.role === 'user'
                     ? 'ml-auto w-fit max-w-[85%] rounded-2xl bg-emerald-600 px-3 py-2 text-sm'
-                    : 'mr-auto w-fit max-w-[85%] rounded-2xl bg-zinc-900 px-3 py-2 text-sm text-zinc-100'
+                    : 'mr-auto w-fit max-w-[85%] rounded-2xl border border-[var(--border)] bg-[color:var(--muted)] px-3 py-2 text-sm text-[var(--foreground)]'
                 }
               >
                 {m.content}
@@ -141,13 +141,13 @@ export function AiChatWidget(props: AiChatWidgetProps) {
             ))}
 
             {err && (
-              <div className="rounded-lg border border-red-900 bg-red-950/50 p-2 text-sm text-red-200">
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-600">
                 {err}
               </div>
             )}
           </div>
 
-          <div className="border-t border-zinc-800 p-3">
+          <div className="border-t border-[var(--border)] p-3">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -160,7 +160,7 @@ export function AiChatWidget(props: AiChatWidgetProps) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={locale?.startsWith('es') ? 'Escribe tu pregunta…' : 'Type your question…'}
-                className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[color:var(--muted)]"
               />
               <button
                 type="submit"
@@ -171,7 +171,7 @@ export function AiChatWidget(props: AiChatWidgetProps) {
               </button>
             </form>
 
-            <div className="mt-2 text-xs text-zinc-500">
+            <div className="mt-2 text-xs text-[color:var(--muted)]">
               {locale?.startsWith('es')
                 ? 'Tip: pregunta por estrategias, cómo elegir marcadores, o “qué partido es más impredecible”.'
                 : 'Tip: ask about strategy, how to pick scores, or “which match is most unpredictable”.'}
