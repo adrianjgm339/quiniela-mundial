@@ -574,7 +574,9 @@ export default function LeagueSettingsPage() {
 
                   <div className="flex gap-2">
                     {isOwner ? (
-                      <span className="px-3 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-sm">OWNER (no editable)</span>
+                      <span className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] text-sm">
+                        OWNER (no editable)
+                      </span>
                     ) : (
                       <>
                         {isAdmin ? (
