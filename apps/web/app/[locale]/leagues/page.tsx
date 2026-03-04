@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   getMyLeagues,
@@ -201,6 +201,10 @@ export default function LeaguesPage() {
   const [loadingRules, setLoadingRules] = useState(false);
 
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>(''); // '' = "Seleccionar"
+  const selectedLeagueIdRef = useRef<string>('');
+  useEffect(() => {
+    selectedLeagueIdRef.current = selectedLeagueId;
+  }, [selectedLeagueId]);
   const [selectedRuleId, setSelectedRuleId] = useState<string>(''); // '' = sin regla seleccionada
   const [selectedRule, setSelectedRule] = useState<ApiScoringRule | null>(null);
   const [loadingRuleDetails, setLoadingRuleDetails] = useState(false);
@@ -312,25 +316,24 @@ export default function LeaguesPage() {
   }, [locale]);
 
   // 2) cargar ligas
-  const refreshLeagues = useCallback(
-    async (tkn: string) => {
-      const data = await getMyLeagues(tkn);
-      setLeagues(data);
+  const refreshLeagues = useCallback(async (tkn: string) => {
+    const data = await getMyLeagues(tkn);
+    setLeagues(data);
 
-      // No auto-seleccionamos nada: dejamos "Seleccionar" por defecto
-      if (selectedLeagueId === NEW_LEAGUE) return data;
+    const currentSelectedLeagueId = selectedLeagueIdRef.current;
 
-      // si la liga seleccionada ya no existe, limpiar selección
-      if (selectedLeagueId && !data.some((x) => x.id === selectedLeagueId)) {
-        setSelectedLeagueId('');
-        setSelectedRuleId('');
-        setSelectedRule(null);
-      }
+    // No auto-seleccionamos nada: dejamos "Seleccionar" por defecto
+    if (currentSelectedLeagueId === NEW_LEAGUE) return data;
 
-      return data;
-    },
-    [selectedLeagueId],
-  );
+    // si la liga seleccionada ya no existe, limpiar selección
+    if (currentSelectedLeagueId && !data.some((x) => x.id === currentSelectedLeagueId)) {
+      setSelectedLeagueId('');
+      setSelectedRuleId('');
+      setSelectedRule(null);
+    }
+
+    return data;
+  }, []);
 
   useEffect(() => {
     if (!token) return;
