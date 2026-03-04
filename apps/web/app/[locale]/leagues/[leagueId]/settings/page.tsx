@@ -365,9 +365,9 @@ export default function LeagueSettingsPage() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-2xl font-semibold">Configuración de Liga</div>
-          <div className="text-sm text-zinc-400 mt-1">
+          <div className="text-sm text-[color:var(--muted)] mt-1">
             Liga:{' '}
-            <span className="text-zinc-200">
+            <span className="font-medium text-[var(--foreground)]">
               {leagueName ? leagueName : leagueId}
             </span>
           </div>
@@ -376,14 +376,14 @@ export default function LeagueSettingsPage() {
         <div className="flex gap-2">
           <button
             onClick={() => token && loadMembers(token)}
-            className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium"
+            className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium"
           >
             Recargar
           </button>
 
           <Link
             href={`/${locale}/leagues`}
-            className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium"
+            className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium"
           >
             Volver a Ligas
           </Link>
@@ -407,34 +407,34 @@ export default function LeagueSettingsPage() {
 
       <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Acceso e invitaciones */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40">
-          <div className="p-5 border-b border-zinc-800">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)]">
+          <div className="p-5 border-b border-[var(--border)]">
             <div className="font-semibold">Acceso e invitaciones</div>
-            <div className="text-sm text-zinc-400 mt-1">
+            <div className="text-sm text-[color:var(--muted)] mt-1">
               Tipos:
-              <span className="text-zinc-200"> Pública</span> (entra directo),
-              <span className="text-zinc-200"> Privada</span> (solo con código),
-              <span className="text-zinc-200"> Con aprobación</span> (con código + solicitud).
+              <span className="text-[var(--foreground)]"> Pública</span> (entra directo),
+              <span className="text-[var(--foreground)]"> Privada</span> (solo con código),
+              <span className="text-[var(--foreground)]"> Con aprobación</span> (con código + solicitud).
             </div>
           </div>
 
           {accessLoading ? (
-            <div className="p-5 text-zinc-400">Cargando…</div>
+            <div className="p-5 text-[color:var(--muted)]">Cargando…</div>
           ) : !access ? (
-            <div className="p-5 text-zinc-400">No se pudo cargar la configuración.</div>
+            <div className="p-5 text-[color:var(--muted)]">No se pudo cargar la configuración.</div>
           ) : (
             <div className="p-5 space-y-4">
               <div>
-                <div className="text-sm text-zinc-400 mb-1">Código de invitación</div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Código de invitación</div>
                 <div className="flex items-center gap-2">
-                  <div className="px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 font-mono">
+                  <div className="px-3 py-2 rounded-xl bg-[var(--background)] border border-[var(--border)] font-mono text-[var(--foreground)]">
                     {access.joinCode}
                   </div>
 
                   <button
                     disabled={!canManageRoles || !token || accessSaving}
                     onClick={() => token && rotateCode(token)}
-                    className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800"
+                    className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--card)]"
                   >
                     Rotar código
                   </button>
@@ -448,12 +448,12 @@ export default function LeagueSettingsPage() {
               </div>
 
               <div>
-                <div className="text-sm text-zinc-400 mb-1">Tipo de liga</div>
+                <div className="text-sm text-[color:var(--muted)] mb-1">Tipo de liga</div>
                 <select
                   value={joinPolicyDraft}
                   onChange={(e) => setJoinPolicyDraft(toJoinPolicy(e.target.value))}
                   disabled={!canManageRoles || !token || accessSaving}
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 disabled:opacity-50"
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50"
                 >
                   <option value="PRIVATE">Privada (solo con código)</option>
                   <option value="PUBLIC">Pública (entra directo)</option>
@@ -468,14 +468,14 @@ export default function LeagueSettingsPage() {
                   onChange={(e) => setInviteEnabledDraft(e.target.checked)}
                   disabled={!canManageRoles || !token || accessSaving}
                 />
-                <span className="text-zinc-200">Invitaciones habilitadas</span>
+                <span className="text-[var(--foreground)]">Invitaciones habilitadas</span>
               </label>
 
               <div className="flex justify-end">
                 <button
                   disabled={!canManageRoles || !token || accessSaving}
                   onClick={() => token && saveAccess(token)}
-                  className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800"
+                  className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--card)]"
                 >
                   Guardar
                 </button>
@@ -487,22 +487,22 @@ export default function LeagueSettingsPage() {
         </div>
 
         {/* Solicitudes pendientes */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40">
-          <div className="p-5 border-b border-zinc-800">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)]">
+          <div className="p-5 border-b border-[var(--border)]">
             <div className="font-semibold">Solicitudes pendientes</div>
-            <div className="text-sm text-zinc-400 mt-1">
-              Solo visible para <span className="text-zinc-200">OWNER/ADMIN</span>.
+            <div className="text-sm text-[color:var(--muted)] mt-1">
+              Solo visible para <span className="text-[var(--foreground)]">OWNER/ADMIN</span>.
             </div>
           </div>
 
           {!canManageRoles ? (
-            <div className="p-5 text-zinc-400">No tienes permisos para ver solicitudes.</div>
+            <div className="p-5 text-[color:var(--muted)]">No tienes permisos para ver solicitudes.</div>
           ) : requestsLoading ? (
-            <div className="p-5 text-zinc-400">Cargando…</div>
+            <div className="p-5 text-[color:var(--muted)]">Cargando…</div>
           ) : joinRequests.length === 0 ? (
-            <div className="p-5 text-zinc-400">No hay solicitudes pendientes.</div>
+            <div className="p-5 text-[color:var(--muted)]">No hay solicitudes pendientes.</div>
           ) : (
-            <div className="divide-y divide-zinc-800">
+            <div className="divide-y divide-[var(--border)]">
               {joinRequests.map((r) => {
                 const label = (r.displayName || r.email || r.userId).trim();
                 const busy = decidingRequestId === r.requestId;
@@ -511,21 +511,21 @@ export default function LeagueSettingsPage() {
                   <div key={r.requestId} className="p-4 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium truncate">{label}</div>
-                      <div className="text-sm text-zinc-400 truncate">{r.email}</div>
+                      <div className="text-sm text-[color:var(--muted)] truncate">{r.email}</div>
                     </div>
 
                     <div className="flex gap-2">
                       <button
                         disabled={!token || busy}
                         onClick={() => token && decideJoinRequest(token, r.requestId, true)}
-                        className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800"
+                        className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--card)]"
                       >
                         Aprobar
                       </button>
                       <button
                         disabled={!token || busy}
                         onClick={() => token && decideJoinRequest(token, r.requestId, false)}
-                        className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800"
+                        className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--card)]"
                       >
                         Rechazar
                       </button>
@@ -538,11 +538,11 @@ export default function LeagueSettingsPage() {
         </div>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
-        <div className="p-5 border-b border-zinc-800">
+      <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--card)]">
+        <div className="p-5 border-b border-[var(--border)]">
           <div className="font-semibold">Miembros</div>
-          <div className="text-sm text-zinc-400 mt-1">
-            Solo el <span className="text-zinc-200">OWNER</span> o un <span className="text-zinc-200">ADMIN</span> de la
+          <div className="text-sm text-[color:var(--muted)] mt-1">
+            Solo el <span className="text-[var(--foreground)]">OWNER</span> o un <span className="text-[var(--foreground)]">ADMIN</span> de la
             liga puede asignar admins.
             {myRole === 'MEMBER' && (
               <div className="text-xs text-amber-200 mt-2">
@@ -553,11 +553,11 @@ export default function LeagueSettingsPage() {
         </div>
 
         {loading ? (
-          <div className="p-5 text-zinc-400">Cargando…</div>
+          <div className="p-5 text-[color:var(--muted)]">Cargando…</div>
         ) : members.length === 0 ? (
-          <div className="p-5 text-zinc-400">No hay miembros para mostrar.</div>
+          <div className="p-5 text-[color:var(--muted)]">No hay miembros para mostrar.</div>
         ) : (
-          <div className="divide-y divide-zinc-800">
+          <div className="divide-y divide-[var(--border)]">
             {members.map((m) => {
               const name = (m.displayName || m.email || m.userId).trim();
               const isOwner = m.role === 'OWNER';
@@ -567,8 +567,8 @@ export default function LeagueSettingsPage() {
                 <div key={m.userId} className="p-4 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-medium truncate">{name}</div>
-                    <div className="text-sm text-zinc-400 truncate">
-                      {m.email} · <span className="text-zinc-200">{m.role}</span> · {m.status}
+                    <div className="text-sm text-[color:var(--muted)] truncate">
+                      {m.email} · <span className="text-[var(--foreground)]">{m.role}</span> · {m.status}
                     </div>
                   </div>
 
@@ -581,7 +581,7 @@ export default function LeagueSettingsPage() {
                           <button
                             disabled={!canManageRoles || savingUserId === m.userId}
                             onClick={() => changeRole(m.userId, 'MEMBER')}
-                            className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800"
+                            className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--card)]"
                           >
                             Quitar admin
                           </button>
@@ -589,7 +589,7 @@ export default function LeagueSettingsPage() {
                           <button
                             disabled={!canManageRoles || savingUserId === m.userId}
                             onClick={() => changeRole(m.userId, 'ADMIN')}
-                            className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-zinc-800"
+                            className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--card)]"
                           >
                             Hacer admin
                           </button>

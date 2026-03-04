@@ -1359,9 +1359,9 @@ export default function LeaguesPage() {
                         <Badge>{joinPolicyLabel(league.joinPolicy ?? undefined)}</Badge>
                       </div>
                       <div className="text-sm text-[color:var(--muted)]">
-                        Código: <span className="text-zinc-200">{league.joinCode}</span>
+                        Código: <span className="font-medium text-[var(--foreground)]">{league.joinCode}</span>
                         {' · '}
-                        Regla: <span className="text-zinc-200">{league.scoringRuleId ?? '—'}</span>
+                        Regla: <span className="font-medium text-[var(--foreground)]">{league.scoringRuleId ?? '—'}</span>
                       </div>
                     </div>
 
