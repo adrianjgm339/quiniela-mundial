@@ -60,7 +60,7 @@ export class AuthService {
     return { user: safeUser, token };
   }
 
-    async googleLogin(input: { idToken: string }) {
+  async googleLogin(input: { idToken: string }) {
     const idToken = (input.idToken || '').trim();
     if (!idToken) throw new BadRequestException('idToken is required');
 
@@ -155,24 +155,21 @@ export class AuthService {
             id: true,
             slug: true,
             translations: {
-              where: { locale },
-              select: { name: true },
+              select: { locale: true, name: true },
             },
             competition: {
               select: {
                 id: true,
                 slug: true,
                 translations: {
-                  where: { locale },
-                  select: { name: true },
+                  select: { locale: true, name: true },
                 },
                 sport: {
                   select: {
                     id: true,
                     slug: true,
                     translations: {
-                      where: { locale },
-                      select: { name: true },
+                      select: { locale: true, name: true },
                     },
                   },
                 },
@@ -185,21 +182,59 @@ export class AuthService {
 
     if (!user) throw new UnauthorizedException('User not found');
 
+    const toTitle = (slug: string) =>
+      (slug || '')
+        .trim()
+        .replace(/-/g, ' ')
+        .replace(/\p{L}[\p{L}\p{M}'’\-]*/gu, (w) => w.charAt(0).toUpperCase() + w.slice(1));
+
+    const pickName = (
+      translations: Array<{ locale: string; name: string }> | undefined,
+      preferredLocale: string,
+      fallbackSlug: string
+    ) => {
+      const list = Array.isArray(translations) ? translations : [];
+      const p = (preferredLocale || '').trim();
+
+      const exact = list.find((t) => (t.locale || '').trim() === p)?.name?.trim();
+      if (exact) return exact;
+
+      const es = list.find((t) => (t.locale || '').trim() === 'es')?.name?.trim();
+      if (es) return es;
+
+      const en = list.find((t) => (t.locale || '').trim() === 'en')?.name?.trim();
+      if (en) return en;
+
+      const any = list.find((t) => (t.name || '').trim())?.name?.trim();
+      if (any) return any;
+
+      const slug = (fallbackSlug || '').trim();
+      return slug ? toTitle(slug) : '';
+    };
+
     return {
       ...user,
       activeSeason: user.activeSeason
         ? {
           id: user.activeSeason.id,
           slug: user.activeSeason.slug,
-          name: user.activeSeason.translations[0]?.name ?? '',
+          name: pickName(user.activeSeason.translations, locale, user.activeSeason.slug),
           competition: {
             id: user.activeSeason.competition.id,
             slug: user.activeSeason.competition.slug,
-            name: user.activeSeason.competition.translations[0]?.name ?? '',
+            name: pickName(
+              user.activeSeason.competition.translations,
+              locale,
+              user.activeSeason.competition.slug
+            ),
             sport: {
               id: user.activeSeason.competition.sport.id,
               slug: user.activeSeason.competition.sport.slug,
-              name: user.activeSeason.competition.sport.translations[0]?.name ?? '',
+              name: pickName(
+                user.activeSeason.competition.sport.translations,
+                locale,
+                user.activeSeason.competition.sport.slug
+              ),
             },
           },
         }
