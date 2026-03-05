@@ -507,7 +507,7 @@ export class ScoringService {
     for (let i = 0; i < picks.length; i += batchSize) {
       const batch = picks.slice(i, i + batchSize);
 
-      await this.prisma.$transaction(async (tx) => {
+      // NOTE: No usamos interactive transactions aquí (Neon pooler + Vercel -> P2028)
         for (const p of batch) {
           const score = matchScoreById.get(p.matchId);
           if (!score) continue;
@@ -530,7 +530,7 @@ export class ScoringService {
             .map(([code, pts]) => ({ code, points: pts }));
 
           // upsert league-rule score
-          const psLeague = await tx.pickScore.upsert({
+          const psLeague = await this.prisma.pickScore.upsert({
             where: { pickId_ruleId: { pickId: p.id, ruleId: leagueRuleId } },
             create: {
               pickId: p.id,
@@ -540,11 +540,11 @@ export class ScoringService {
             update: { points: bdLeague.total },
           });
 
-          await tx.pickScoreDetail.deleteMany({
+          await this.prisma.pickScoreDetail.deleteMany({
             where: { pickScoreId: psLeague.id },
           });
           if (detailRowsLeague.length) {
-            await tx.pickScoreDetail.createMany({
+            await this.prisma.pickScoreDetail.createMany({
               data: detailRowsLeague.map((d) => ({
                 pickScoreId: psLeague.id,
                 code: d.code,
@@ -554,17 +554,17 @@ export class ScoringService {
           }
 
           // upsert B01 score
-          const psGlobal = await tx.pickScore.upsert({
+          const psGlobal = await this.prisma.pickScore.upsert({
             where: { pickId_ruleId: { pickId: p.id, ruleId: B01 } },
             create: { pickId: p.id, ruleId: B01, points: bdGlobal.total },
             update: { points: bdGlobal.total },
           });
 
-          await tx.pickScoreDetail.deleteMany({
+          await this.prisma.pickScoreDetail.deleteMany({
             where: { pickScoreId: psGlobal.id },
           });
           if (detailRowsGlobal.length) {
-            await tx.pickScoreDetail.createMany({
+           await this.prisma.pickScoreDetail.createMany({
               data: detailRowsGlobal.map((d) => ({
                 pickScoreId: psGlobal.id,
                 code: d.code,
@@ -575,7 +575,6 @@ export class ScoringService {
 
           processed++;
         }
-      });
     }
 
     return {
