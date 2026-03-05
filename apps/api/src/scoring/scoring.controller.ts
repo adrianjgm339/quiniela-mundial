@@ -10,6 +10,7 @@ import {
   Req,
   UseGuards,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ScoringService } from './scoring.service';
 import { JwtAuthGuard } from '../auth/jwt.guard'; // ajusta si tu guard está en otra ruta
@@ -17,7 +18,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard'; // ajusta si tu guard está en
 @Controller('scoring')
 @UseGuards(JwtAuthGuard)
 export class ScoringController {
-  constructor(private readonly scoring: ScoringService) {}
+  constructor(private readonly scoring: ScoringService) { }
 
   private assertAdmin(req: any) {
     if (req.user?.role !== 'ADMIN') throw new ForbiddenException('Admin only');
@@ -96,8 +97,16 @@ export class ScoringController {
   }
 
   @Post('recompute')
-  async recompute(@Req() req: any, @Query('seasonId') seasonId?: string) {
-    if (req.user?.role !== 'ADMIN') throw new ForbiddenException('Admin only');
-    return this.scoring.recompute({ seasonId: seasonId || undefined });
+  async recompute(
+    @Req() req: any,
+    @Query('seasonId') seasonIdQ?: string,
+    @Body() body?: { seasonId?: string },
+  ) {
+    this.assertAdmin(req);
+
+    const seasonId = (seasonIdQ || body?.seasonId || '').trim();
+    if (!seasonId) throw new BadRequestException('seasonId requerido');
+
+    return this.scoring.recompute({ seasonId });
   }
 }

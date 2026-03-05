@@ -527,8 +527,11 @@ export default function AdminResultsPage() {
     return res.json();
   }
 
-  async function recomputeScoring(token: string) {
-    const res = await fetch(`${API_URL}/scoring/recompute`, {
+  async function recomputeScoring(token: string, seasonId: string) {
+    const qs = new URLSearchParams();
+    qs.set('seasonId', seasonId);
+
+    const res = await fetch(`${API_URL}/scoring/recompute?${qs.toString()}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -783,12 +786,17 @@ export default function AdminResultsPage() {
     const token = getTokenOrRedirect();
     if (!token) return;
 
+    if (!activeSeasonId) {
+      setError('No hay season activa para recalcular scoring.');
+      return;
+    }
+
     try {
       setError(null);
       setRecomputeMsg(null);
       setRecomputing(true);
 
-      const r = await recomputeScoring(token);
+      const r = await recomputeScoring(token, activeSeasonId);
 
       setRecomputeMsg(
         `✅ Scoring recalculado: ${r.confirmedMatchesWithScore} partidos confirmados · ${r.picksProcessed} picks procesados.`,
