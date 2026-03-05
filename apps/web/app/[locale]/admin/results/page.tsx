@@ -24,6 +24,12 @@ type ApiMatchLite = {
   resultConfirmed?: boolean;
   score?: { home: number | null; away: number | null };
 
+  // Béisbol: stats oficiales (si el API los expone)
+  homeHits?: number | null;
+  awayHits?: number | null;
+  homeErrors?: number | null;
+  awayErrors?: number | null;
+
   // KO: quién avanza y método (solo aplica KO)
   advanceTeamId?: string | null;
   advanceMethod?: 'ET' | 'PEN' | null;
@@ -225,6 +231,11 @@ export default function AdminResultsPage() {
         homeScore: string;
         awayScore: string;
         resultConfirmed: boolean;
+        // Béisbol (oficial):
+        homeHits: string;
+        awayHits: string;
+        homeErrors: string;
+        awayErrors: string;
 
         // KO:
         advanceTeamId: string; // '' | teamId
@@ -426,7 +437,21 @@ export default function AdminResultsPage() {
     // - Si confirmado => usar score.home/score.away (incluye 0 si aplica)
     const nextDraft: Record<
       string,
-      { homeScore: string; awayScore: string; resultConfirmed: boolean; advanceTeamId: string; advanceMethod: '' | 'ET' | 'PEN' }
+      {
+        homeScore: string;
+        awayScore: string;
+        resultConfirmed: boolean;
+
+        // Béisbol (oficial):
+        homeHits: string;
+        awayHits: string;
+        homeErrors: string;
+        awayErrors: string;
+
+        // KO:
+        advanceTeamId: string;
+        advanceMethod: '' | 'ET' | 'PEN';
+      }
     > = {};
 
     for (const m of data) {
@@ -434,11 +459,19 @@ export default function AdminResultsPage() {
 
       const hs = confirmed ? m.score?.home : null;
       const as = confirmed ? m.score?.away : null;
+      const hh = confirmed ? (m.homeHits ?? null) : null;
+      const ah = confirmed ? (m.awayHits ?? null) : null;
+      const he = confirmed ? (m.homeErrors ?? null) : null;
+      const ae = confirmed ? (m.awayErrors ?? null) : null;
 
       nextDraft[m.id] = {
         homeScore: hs === null || hs === undefined ? '' : String(hs),
         awayScore: as === null || as === undefined ? '' : String(as),
         resultConfirmed: confirmed,
+        homeHits: hh === null || hh === undefined ? '' : String(hh),
+        awayHits: ah === null || ah === undefined ? '' : String(ah),
+        homeErrors: he === null || he === undefined ? '' : String(he),
+        awayErrors: ae === null || ae === undefined ? '' : String(ae),
 
         advanceTeamId: (m.advanceTeamId ?? '') || '',
         advanceMethod: toAdvanceMethod(m.advanceMethod),
@@ -475,6 +508,11 @@ export default function AdminResultsPage() {
       resultConfirmed?: boolean;
       advanceTeamId?: string;
       advanceMethod?: 'ET' | 'PEN';
+      // Béisbol: stats oficiales
+      homeHits?: number;
+      awayHits?: number;
+      homeErrors?: number;
+      awayErrors?: number;
     },
   ) {
     const res = await fetch(`${API_URL}/matches/${matchId}/result`, {
@@ -632,6 +670,28 @@ export default function AdminResultsPage() {
     const hs = d.homeScore.trim() === '' ? undefined : Number(d.homeScore);
     const as = d.awayScore.trim() === '' ? undefined : Number(d.awayScore);
 
+    const hh = d.homeHits.trim() === '' ? undefined : Number(d.homeHits);
+    const ah = d.awayHits.trim() === '' ? undefined : Number(d.awayHits);
+    const he = d.homeErrors.trim() === '' ? undefined : Number(d.homeErrors);
+    const ae = d.awayErrors.trim() === '' ? undefined : Number(d.awayErrors);
+
+    const validateNonNegInt = (val: number | undefined, label: string) => {
+      if (val === undefined) return true;
+      if (!Number.isInteger(val) || val < 0) {
+        setError(`${label} debe ser entero >= 0`);
+        return false;
+      }
+      return true;
+    };
+
+    // Solo validamos si vienen informados (por ahora NO obligamos a llenarlos)
+    if (isBaseballContext) {
+      if (!validateNonNegInt(hh, 'homeHits')) return;
+      if (!validateNonNegInt(ah, 'awayHits')) return;
+      if (!validateNonNegInt(he, 'homeErrors')) return;
+      if (!validateNonNegInt(ae, 'awayErrors')) return;
+    }
+
     if (hs !== undefined && (!Number.isInteger(hs) || hs < 0)) {
       setError('homeScore debe ser entero >= 0');
       return;
@@ -699,10 +759,14 @@ export default function AdminResultsPage() {
         homeScore: hs,
         awayScore: as,
         resultConfirmed: d.resultConfirmed,
-
         // Solo enviamos si el admin seleccionó algo (en empate KO)
         advanceTeamId: d.advanceTeamId ? d.advanceTeamId : undefined,
         advanceMethod: d.advanceMethod ? (d.advanceMethod as 'ET' | 'PEN') : undefined,
+        // Béisbol: stats oficiales
+        homeHits: isBaseballContext ? hh : undefined,
+        awayHits: isBaseballContext ? ah : undefined,
+        homeErrors: isBaseballContext ? he : undefined,
+        awayErrors: isBaseballContext ? ae : undefined,
       });
 
 
@@ -1183,6 +1247,10 @@ export default function AdminResultsPage() {
             homeScore: m.score?.home != null ? String(m.score.home) : '',
             awayScore: m.score?.away != null ? String(m.score.away) : '',
             resultConfirmed: !!m.resultConfirmed,
+            homeHits: m.homeHits != null ? String(m.homeHits) : '',
+            awayHits: m.awayHits != null ? String(m.awayHits) : '',
+            homeErrors: m.homeErrors != null ? String(m.homeErrors) : '',
+            awayErrors: m.awayErrors != null ? String(m.awayErrors) : '',
             advanceTeamId: m.advanceTeamId ?? '',
             advanceMethod: toAdvanceMethod(m.advanceMethod),
           };
@@ -1301,7 +1369,7 @@ export default function AdminResultsPage() {
                   </div>
                 </div>
 
-                <div className="grid items-center gap-4" style={{ gridTemplateColumns: "120px 52px 52px 120px auto auto" }}>
+                <div className="grid items-center gap-4" style={{ gridTemplateColumns: "minmax(140px,1fr) 56px 56px minmax(140px,1fr) minmax(140px,auto) auto" }}>
                   <div className="text-sm opacity-80 text-right truncate">
                     <span className="inline-flex justify-end">
                       <TeamWithFlag
@@ -1411,6 +1479,98 @@ export default function AdminResultsPage() {
                         <option value="ET">Prórroga</option>
                         <option value="PEN">Penales</option>
                       </select>
+                    </div>
+                  ) : null}
+
+                  {isBaseballContext ? (
+                    <div
+                      className="mt-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] px-3 py-2"
+                      style={{ gridColumn: "1 / -1" }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-medium uppercase tracking-wide text-[color:var(--muted)]">
+                          Béisbol · Stats oficiales
+                        </div>
+                        <div className="text-[11px] text-[color:var(--muted)]">
+                          Totales del juego = Local + Visitante (se usa en scoring)
+                        </div>
+                      </div>
+
+                      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                        {/* Hits */}
+                        <div className="flex items-center justify-between gap-3 rounded-md border border-[color:var(--border)] bg-[color:var(--card)] px-3 py-2">
+                          <div className="min-w-[72px] text-sm font-medium">Hits</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-xs opacity-70">L</div>
+                            <input
+                              className={controlInput}
+                              value={d.homeHits}
+                              disabled={savingId === m.id || m.resultConfirmed || blockedByPrevPhase}
+                              onChange={(e) =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  [m.id]: { ...d, homeHits: e.target.value },
+                                }))
+                              }
+                              inputMode="numeric"
+                              placeholder="HL"
+                              title="Hits Local"
+                            />
+                            <div className="text-xs opacity-70">V</div>
+                            <input
+                              className={controlInput}
+                              value={d.awayHits}
+                              disabled={savingId === m.id || m.resultConfirmed || blockedByPrevPhase}
+                              onChange={(e) =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  [m.id]: { ...d, awayHits: e.target.value },
+                                }))
+                              }
+                              inputMode="numeric"
+                              placeholder="HV"
+                              title="Hits Visitante"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Errores */}
+                        <div className="flex items-center justify-between gap-3 rounded-md border border-[color:var(--border)] bg-[color:var(--card)] px-3 py-2">
+                          <div className="min-w-[72px] text-sm font-medium">Errores</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-xs opacity-70">L</div>
+                            <input
+                              className={controlInput}
+                              value={d.homeErrors}
+                              disabled={savingId === m.id || m.resultConfirmed || blockedByPrevPhase}
+                              onChange={(e) =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  [m.id]: { ...d, homeErrors: e.target.value },
+                                }))
+                              }
+                              inputMode="numeric"
+                              placeholder="EL"
+                              title="Errores Local"
+                            />
+                            <div className="text-xs opacity-70">V</div>
+                            <input
+                              className={controlInput}
+                              value={d.awayErrors}
+                              disabled={savingId === m.id || m.resultConfirmed || blockedByPrevPhase}
+                              onChange={(e) =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  [m.id]: { ...d, awayErrors: e.target.value },
+                                }))
+                              }
+                              inputMode="numeric"
+                              placeholder="EV"
+                              title="Errores Visitante"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   ) : null}
 

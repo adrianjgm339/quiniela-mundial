@@ -23,7 +23,7 @@ function assertAdmin(req: any) {
 
 @Controller('catalog')
 export class CatalogController {
-  constructor(private catalog: CatalogService) { }
+  constructor(private catalog: CatalogService) {}
 
   // Público (usado por /[locale]/catalog)
   @Get()
@@ -44,7 +44,11 @@ export class CatalogController {
 
   @UseGuards(JwtAuthGuard)
   @Patch('sports/:id')
-  async updateSport(@Req() req: any, @Param('id') id: string, @Body() body: { names: NamesByLocale }) {
+  async updateSport(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { names: NamesByLocale },
+  ) {
     assertAdmin(req);
     return this.catalog.updateSport(id, { names: body.names });
   }
@@ -63,7 +67,10 @@ export class CatalogController {
     @Body() body: { sportId: string; names: NamesByLocale },
   ) {
     assertAdmin(req);
-    return this.catalog.createCompetition({ sportId: body.sportId, names: body.names });
+    return this.catalog.createCompetition({
+      sportId: body.sportId,
+      names: body.names,
+    });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -96,7 +103,6 @@ export class CatalogController {
       endDate?: string | null;
       defaultScoringRuleId?: string;
     },
-
   ) {
     assertAdmin(req);
     return this.catalog.createSeason({
@@ -106,7 +112,6 @@ export class CatalogController {
       endDate: body.endDate ?? null,
       defaultScoringRuleId: body.defaultScoringRuleId,
     });
-
   }
 
   @UseGuards(JwtAuthGuard)
@@ -121,7 +126,6 @@ export class CatalogController {
       endDate?: string | null;
       defaultScoringRuleId?: string;
     },
-
   ) {
     assertAdmin(req);
     return this.catalog.updateSeason(id, {
@@ -130,7 +134,6 @@ export class CatalogController {
       endDate: body.endDate,
       defaultScoringRuleId: body.defaultScoringRuleId,
     });
-
   }
 
   @UseGuards(JwtAuthGuard)

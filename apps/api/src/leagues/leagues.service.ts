@@ -1,9 +1,14 @@
-import { BadRequestException, Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class LeaguesService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   async myLeagues(userId: string) {
     const rows = await this.prisma.leagueMember.findMany({
@@ -31,13 +36,19 @@ export class LeaguesService {
 
   async createLeague(
     userId: string,
-    input: { seasonId: string; name: string; scoringRuleId: string; joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL' },
+    input: {
+      seasonId: string;
+      name: string;
+      scoringRuleId: string;
+      joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL';
+    },
   ) {
     const name = (input.name || '').trim();
     const seasonId = (input.seasonId || '').trim();
 
     const scoringRuleId = (input.scoringRuleId || '').trim();
-    if (!scoringRuleId) throw new BadRequestException('scoringRuleId is required');
+    if (!scoringRuleId)
+      throw new BadRequestException('scoringRuleId is required');
 
     // validar que la regla exista y pertenezca al mismo evento (Season)
     const rule = await this.prisma.scoringRule.findUnique({
@@ -47,10 +58,13 @@ export class LeaguesService {
     if (!rule) throw new NotFoundException('Scoring rule not found');
 
     if (rule.seasonId && rule.seasonId !== seasonId) {
-      throw new BadRequestException('Scoring rule does not belong to this season');
+      throw new BadRequestException(
+        'Scoring rule does not belong to this season',
+      );
     }
 
-    if (!name || !seasonId) throw new BadRequestException('seasonId and name are required');
+    if (!name || !seasonId)
+      throw new BadRequestException('seasonId and name are required');
 
     // joinCode simple (luego lo hacemos más robusto)
     const joinCode = Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -71,7 +85,6 @@ export class LeaguesService {
             role: 'OWNER',
           },
         },
-
       },
       select: {
         id: true,
@@ -82,7 +95,6 @@ export class LeaguesService {
         createdById: true,
         scoringRuleId: true,
       },
-
     });
 
     return { ...league, myRole: 'OWNER' as const };
@@ -94,7 +106,12 @@ export class LeaguesService {
 
     const league = await this.prisma.league.findUnique({
       where: { joinCode },
-      select: { id: true, seasonId: true, joinPolicy: true, inviteEnabled: true },
+      select: {
+        id: true,
+        seasonId: true,
+        joinPolicy: true,
+        inviteEnabled: true,
+      },
     });
     if (!league) throw new BadRequestException('Código inválido o expirado');
 
@@ -109,12 +126,22 @@ export class LeaguesService {
     if (league.joinPolicy === 'APPROVAL') {
       const req = await this.prisma.leagueJoinRequest.upsert({
         where: { leagueId_userId: { leagueId: league.id, userId } },
-        update: { status: 'PENDING', decidedAt: null, decidedById: null, reason: null },
+        update: {
+          status: 'PENDING',
+          decidedAt: null,
+          decidedById: null,
+          reason: null,
+        },
         create: { leagueId: league.id, userId, status: 'PENDING' },
         select: { id: true, status: true },
       });
 
-      return { ok: true, leagueId: league.id, pending: true, requestId: req.id };
+      return {
+        ok: true,
+        leagueId: league.id,
+        pending: true,
+        requestId: req.id,
+      };
     }
 
     // PRIVATE/PUBLIC por código => entra directo
@@ -155,8 +182,10 @@ export class LeaguesService {
       select: { status: true, role: true },
     });
 
-    if (!m || m.status !== 'ACTIVE') throw new ForbiddenException('Not a member of this league');
-    if (m.role !== 'OWNER' && m.role !== 'ADMIN') throw new ForbiddenException('Insufficient league role');
+    if (!m || m.status !== 'ACTIVE')
+      throw new ForbiddenException('Not a member of this league');
+    if (m.role !== 'OWNER' && m.role !== 'ADMIN')
+      throw new ForbiddenException('Insufficient league role');
   }
 
   // Estricto: SOLO ADMIN/OWNER de la liga (NO bypass por ADMIN global)
@@ -166,8 +195,10 @@ export class LeaguesService {
       select: { status: true, role: true },
     });
 
-    if (!m || m.status !== 'ACTIVE') throw new ForbiddenException('Not a member of this league');
-    if (m.role !== 'OWNER' && m.role !== 'ADMIN') throw new ForbiddenException('Insufficient league role');
+    if (!m || m.status !== 'ACTIVE')
+      throw new ForbiddenException('Not a member of this league');
+    if (m.role !== 'OWNER' && m.role !== 'ADMIN')
+      throw new ForbiddenException('Insufficient league role');
   }
 
   private async assertTournamentNotStarted(seasonId: string) {
@@ -188,11 +219,17 @@ export class LeaguesService {
     if (!start) return; // si no hay partidos cargados aún, no bloqueamos
 
     if (new Date() >= new Date(start)) {
-      throw new BadRequestException('Tournament already started. League rules are locked.');
+      throw new BadRequestException(
+        'Tournament already started. League rules are locked.',
+      );
     }
   }
 
-  async setLeagueScoringRule(userId: string, leagueId: string, scoringRuleId: string | null) {
+  async setLeagueScoringRule(
+    userId: string,
+    leagueId: string,
+    scoringRuleId: string | null,
+  ) {
     const league = await this.prisma.league.findUnique({
       where: { id: leagueId },
       select: { id: true, seasonId: true },
@@ -210,10 +247,11 @@ export class LeaguesService {
       if (!exists) throw new BadRequestException('Scoring rule not found');
 
       if (exists.seasonId && exists.seasonId !== league.seasonId) {
-        throw new BadRequestException('Scoring rule does not belong to this season');
+        throw new BadRequestException(
+          'Scoring rule does not belong to this season',
+        );
       }
     }
-
 
     return this.prisma.league.update({
       where: { id: leagueId },
@@ -238,7 +276,8 @@ export class LeaguesService {
     await this.assertLeagueAdminOnly(userId, leagueId);
 
     const ruleId = league.scoringRuleId;
-    if (!ruleId) throw new BadRequestException('League has no scoring rule assigned');
+    if (!ruleId)
+      throw new BadRequestException('League has no scoring rule assigned');
 
     // Solo permitir editar regla NO-global (custom)
     const rule = await this.prisma.scoringRule.findUnique({
@@ -246,11 +285,13 @@ export class LeaguesService {
       select: { id: true, isGlobal: true },
     });
     if (!rule) throw new NotFoundException('Scoring rule not found');
-    if (rule.isGlobal) throw new BadRequestException('Global scoring rules cannot be edited');
+    if (rule.isGlobal)
+      throw new BadRequestException('Global scoring rules cannot be edited');
 
     // Validaciones server-side (mismas de UI)
     const details = Array.isArray(input?.details) ? input.details : [];
-    if (details.length === 0) throw new BadRequestException('details are required');
+    if (details.length === 0)
+      throw new BadRequestException('details are required');
 
     const rows = await this.prisma.seasonScoringConcept.findMany({
       where: { seasonId: league.seasonId },
@@ -259,17 +300,27 @@ export class LeaguesService {
     const allowed = new Set(rows.map((x) => x.code));
 
     if (allowed.size === 0) {
-      throw new BadRequestException('Season has no scoring concepts configured');
+      throw new BadRequestException(
+        'Season has no scoring concepts configured',
+      );
     }
 
     let hasPositive = false;
     for (const d of details) {
-      if (!allowed.has(d.code)) throw new BadRequestException(`Invalid code: ${d.code}`);
-      if (!Number.isInteger(d.points)) throw new BadRequestException(`Points must be integer for ${d.code}`);
-      if (d.points < 0) throw new BadRequestException(`Points cannot be negative for ${d.code}`);
+      if (!allowed.has(d.code))
+        throw new BadRequestException(`Invalid code: ${d.code}`);
+      if (!Number.isInteger(d.points))
+        throw new BadRequestException(`Points must be integer for ${d.code}`);
+      if (d.points < 0)
+        throw new BadRequestException(
+          `Points cannot be negative for ${d.code}`,
+        );
       if (d.points > 0) hasPositive = true;
     }
-    if (!hasPositive) throw new BadRequestException('At least one concept must have points > 0');
+    if (!hasPositive)
+      throw new BadRequestException(
+        'At least one concept must have points > 0',
+      );
 
     // Guardado: reemplazamos detalles completos (simple y consistente)
     const name = (input?.name ?? '').trim();
@@ -297,7 +348,8 @@ export class LeaguesService {
       where: { leagueId_userId: { leagueId, userId } },
       select: { status: true },
     });
-    if (!m || m.status !== 'ACTIVE') throw new ForbiddenException('Not a member of this league');
+    if (!m || m.status !== 'ACTIVE')
+      throw new ForbiddenException('Not a member of this league');
 
     const league = await this.prisma.league.findUnique({
       where: { id: leagueId },
@@ -316,7 +368,9 @@ export class LeaguesService {
     const labelByCode = new Map(concepts.map((c) => [c.code, c.label]));
 
     // breakdown real (solo partidos confirmados)
-    const rows = await this.prisma.$queryRaw<Array<{ code: string; points: number }>>`
+    const rows = await this.prisma.$queryRaw<
+      Array<{ code: string; points: number }>
+    >`
       SELECT d.code AS code, COALESCE(SUM(d.points), 0)::int AS points
       FROM "PickScoreDetail" d
       JOIN "PickScore" ps ON ps.id = d."pickScoreId"
@@ -345,7 +399,8 @@ export class LeaguesService {
       LIMIT 1;
     `;
 
-    const totalPoints = totalFromDetails > 0 ? totalFromDetails : (totalArr?.[0]?.points ?? 0);
+    const totalPoints =
+      totalFromDetails > 0 ? totalFromDetails : (totalArr?.[0]?.points ?? 0);
 
     return {
       leagueId: league.id,
@@ -369,7 +424,8 @@ export class LeaguesService {
       where: { leagueId_userId: { leagueId, userId } },
       select: { status: true },
     });
-    if (!m || m.status !== 'ACTIVE') throw new ForbiddenException('Not a member of this league');
+    if (!m || m.status !== 'ACTIVE')
+      throw new ForbiddenException('Not a member of this league');
 
     const rows = await this.prisma.leagueMember.findMany({
       where: { leagueId },
@@ -405,7 +461,8 @@ export class LeaguesService {
     role: 'ADMIN' | 'MEMBER',
   ) {
     if (!targetUserId) throw new BadRequestException('userId is required');
-    if (role !== 'ADMIN' && role !== 'MEMBER') throw new BadRequestException('Invalid role');
+    if (role !== 'ADMIN' && role !== 'MEMBER')
+      throw new BadRequestException('Invalid role');
 
     // Solo admins/owner (o admin global) pueden gestionar
     await this.assertCanManageLeague(userId, leagueId);
@@ -423,10 +480,12 @@ export class LeaguesService {
       where: { leagueId_userId: { leagueId, userId: targetUserId } },
       select: { role: true, status: true },
     });
-    if (!target || target.status !== 'ACTIVE') throw new NotFoundException('Member not found');
+    if (!target || target.status !== 'ACTIVE')
+      throw new NotFoundException('Member not found');
 
     // No se puede cambiar OWNER por este endpoint
-    if (target.role === 'OWNER') throw new ForbiddenException('Cannot change OWNER role');
+    if (target.role === 'OWNER')
+      throw new ForbiddenException('Cannot change OWNER role');
 
     // Actualizar rol
     return this.prisma.leagueMember.update({
@@ -473,7 +532,11 @@ export class LeaguesService {
 
     // si ya soy miembro, marcamos
     const my = await this.prisma.leagueMember.findMany({
-      where: { userId, leagueId: { in: leagues.map((l) => l.id) }, status: 'ACTIVE' },
+      where: {
+        userId,
+        leagueId: { in: leagues.map((l) => l.id) },
+        status: 'ACTIVE',
+      },
       select: { leagueId: true, role: true },
     });
     const myMap = new Map(my.map((m) => [m.leagueId, m.role]));
@@ -543,8 +606,10 @@ export class LeaguesService {
       where: { id: requestId },
       select: { id: true, leagueId: true, userId: true, status: true },
     });
-    if (!req || req.leagueId !== leagueId) throw new NotFoundException('Join request not found');
-    if (req.status !== 'PENDING') throw new BadRequestException('Join request is not pending');
+    if (!req || req.leagueId !== leagueId)
+      throw new NotFoundException('Join request not found');
+    if (req.status !== 'PENDING')
+      throw new BadRequestException('Join request is not pending');
 
     const nextStatus = input.approve ? 'APPROVED' : 'REJECTED';
 
@@ -563,7 +628,12 @@ export class LeaguesService {
         await tx.leagueMember.upsert({
           where: { leagueId_userId: { leagueId, userId: req.userId } },
           update: { status: 'ACTIVE' },
-          create: { leagueId, userId: req.userId, status: 'ACTIVE', role: 'MEMBER' },
+          create: {
+            leagueId,
+            userId: req.userId,
+            status: 'ACTIVE',
+            role: 'MEMBER',
+          },
         });
       }
     });
@@ -577,11 +647,18 @@ export class LeaguesService {
       where: { leagueId_userId: { leagueId, userId } },
       select: { status: true },
     });
-    if (!m || m.status !== 'ACTIVE') throw new ForbiddenException('Not a member of this league');
+    if (!m || m.status !== 'ACTIVE')
+      throw new ForbiddenException('Not a member of this league');
 
     const league = await this.prisma.league.findUnique({
       where: { id: leagueId },
-      select: { id: true, joinCode: true, joinPolicy: true, inviteEnabled: true, seasonId: true },
+      select: {
+        id: true,
+        joinCode: true,
+        joinPolicy: true,
+        inviteEnabled: true,
+        seasonId: true,
+      },
     });
     if (!league) throw new NotFoundException('League not found');
 
@@ -591,7 +668,11 @@ export class LeaguesService {
   async updateLeagueAccessSettings(
     userId: string,
     leagueId: string,
-    input: { joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL'; inviteEnabled?: boolean; rotateCode?: boolean },
+    input: {
+      joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL';
+      inviteEnabled?: boolean;
+      rotateCode?: boolean;
+    },
   ) {
     await this.assertCanManageLeague(userId, leagueId);
 
@@ -604,7 +685,8 @@ export class LeaguesService {
     await this.assertTournamentNotStarted(league.seasonId);
 
     const data: any = {};
-    if (typeof input.inviteEnabled === 'boolean') data.inviteEnabled = input.inviteEnabled;
+    if (typeof input.inviteEnabled === 'boolean')
+      data.inviteEnabled = input.inviteEnabled;
     if (input.joinPolicy) data.joinPolicy = input.joinPolicy as any;
 
     if (input.rotateCode) {
@@ -614,8 +696,12 @@ export class LeaguesService {
     return this.prisma.league.update({
       where: { id: leagueId },
       data,
-      select: { id: true, joinCode: true, joinPolicy: true, inviteEnabled: true },
+      select: {
+        id: true,
+        joinCode: true,
+        joinPolicy: true,
+        inviteEnabled: true,
+      },
     });
   }
-
 }

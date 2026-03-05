@@ -23,6 +23,10 @@ function isAnyResultFieldPresent(dto: UpdateMatchResultDto) {
   return (
     dto.homeScore !== undefined ||
     dto.awayScore !== undefined ||
+    dto.homeHits !== undefined ||
+    dto.awayHits !== undefined ||
+    dto.homeErrors !== undefined ||
+    dto.awayErrors !== undefined ||
     dto.resultConfirmed !== undefined ||
     dto.advanceTeamId !== undefined ||
     dto.advanceMethod !== undefined
@@ -31,7 +35,7 @@ function isAnyResultFieldPresent(dto: UpdateMatchResultDto) {
 
 @Injectable()
 export class MatchesService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   async list(args: ListArgs) {
     const { userId, locale, phaseCode, groupCode } = args;
@@ -102,6 +106,10 @@ export class MatchesService {
         resultConfirmed: true,
         homeScore: true,
         awayScore: true,
+        homeHits: true,
+        awayHits: true,
+        homeErrors: true,
+        awayErrors: true,
         advanceTeamId: true,
         advanceMethod: true,
         homeTeam: {
@@ -174,15 +182,24 @@ export class MatchesService {
             ? { home: m.homeScore, away: m.awayScore }
             : null,
 
-        advanceTeamId: (m as any).advanceTeamId ?? null,
-        advanceMethod: (m as any).advanceMethod ?? null,
+        // Béisbol: stats oficiales (si existen)
+        homeHits: m.homeHits ?? null,
+        awayHits: m.awayHits ?? null,
+        homeErrors: m.homeErrors ?? null,
+        awayErrors: m.awayErrors ?? null,
+
+        advanceTeamId: m.advanceTeamId ?? null,
+        advanceMethod: m.advanceMethod ?? null,
 
         homeTeam: {
           id: m.homeTeam.id,
           externalId: m.homeTeam.externalId,
 
           // name "normal" (como hoy): traducción si existe, si no placeholderRule
-          name: m.homeTeam.translations[0]?.name ?? m.homeTeam.placeholderRule ?? '',
+          name:
+            m.homeTeam.translations[0]?.name ??
+            m.homeTeam.placeholderRule ??
+            '',
 
           // ✅ NUEVO: placeholder crudo SIEMPRE disponible para UI (modo pruebas)
           placeholderRule: m.homeTeam.placeholderRule ?? null,
@@ -194,7 +211,10 @@ export class MatchesService {
           id: m.awayTeam.id,
           externalId: m.awayTeam.externalId,
 
-          name: m.awayTeam.translations[0]?.name ?? m.awayTeam.placeholderRule ?? '',
+          name:
+            m.awayTeam.translations[0]?.name ??
+            m.awayTeam.placeholderRule ??
+            '',
 
           // ✅ NUEVO
           placeholderRule: m.awayTeam.placeholderRule ?? null,
@@ -316,9 +336,24 @@ export class MatchesService {
     // a "partido X" y que el match destino sea F06.
     const ruleMatch = [
       { placeholderRule: { endsWith: token, mode: 'insensitive' as const } },
-      { placeholderRule: { endsWith: `${token})`, mode: 'insensitive' as const } },
-      { placeholderRule: { endsWith: `${token}.`, mode: 'insensitive' as const } },
-      { placeholderRule: { contains: `${token} `, mode: 'insensitive' as const } }, // nota el espacio
+      {
+        placeholderRule: {
+          endsWith: `${token})`,
+          mode: 'insensitive' as const,
+        },
+      },
+      {
+        placeholderRule: {
+          endsWith: `${token}.`,
+          mode: 'insensitive' as const,
+        },
+      },
+      {
+        placeholderRule: {
+          contains: `${token} `,
+          mode: 'insensitive' as const,
+        },
+      }, // nota el espacio
     ];
 
     await this.prisma.match.updateMany({
@@ -348,7 +383,10 @@ export class MatchesService {
     });
   }
 
-  async resetKo(args: { seasonId: string; mode: 'full' | 'future' | 'groups' | 'all' }) {
+  async resetKo(args: {
+    seasonId: string;
+    mode: 'full' | 'future' | 'groups' | 'all';
+  }) {
     const { seasonId, mode } = args;
 
     const phasesToReset =
@@ -369,6 +407,10 @@ export class MatchesService {
       data: {
         homeScore: null,
         awayScore: null,
+        homeHits: null,
+        awayHits: null,
+        homeErrors: null,
+        awayErrors: null,
         resultConfirmed: false,
         advanceTeamId: null,
         advanceMethod: null,
@@ -377,7 +419,13 @@ export class MatchesService {
 
     // ✅ Si solo estamos limpiando fase de grupos, NO tocamos placeholders KO
     if (mode === 'groups') {
-      return { ok: true, seasonId, mode, resetPhases: phasesToReset, restoredFuturePlaceholders: 0 };
+      return {
+        ok: true,
+        seasonId,
+        mode,
+        resetPhases: phasesToReset,
+        restoredFuturePlaceholders: 0,
+      };
     }
 
     // 2) Si es future o full, en ambos casos queremos que F03-F07 vuelvan a placeholders (por externalId)
@@ -399,9 +447,11 @@ export class MatchesService {
     // Mapea externalId => (homeExt, awayExt)
     // Asumimos formato: "F03" + 4 chars home + 4 chars away (ej: F0300910092)
     // Si no calza, fallamos con error claro (no inventamos).
-    const toFix: Array<{ matchId: string; homeExt: string; awayExt: string }> = [];
+    const toFix: Array<{ matchId: string; homeExt: string; awayExt: string }> =
+      [];
 
-    const skippedBadExternalId: Array<{ matchId: string; externalId: string }> = [];
+    const skippedBadExternalId: Array<{ matchId: string; externalId: string }> =
+      [];
 
     for (const m of futureMatches) {
       const ext = m.externalId ?? '';
@@ -435,7 +485,9 @@ export class MatchesService {
     }
 
     // Buscar Teams placeholders por externalId
-    const neededExts = Array.from(new Set(toFix.flatMap((x) => [x.homeExt, x.awayExt])));
+    const neededExts = Array.from(
+      new Set(toFix.flatMap((x) => [x.homeExt, x.awayExt])),
+    );
 
     const teams = await this.prisma.team.findMany({
       where: {
@@ -446,11 +498,21 @@ export class MatchesService {
     });
 
     const map = new Map<string, { id: string; isPlaceholder: boolean }>();
-    for (const t of teams) map.set(t.externalId, { id: t.id, isPlaceholder: t.isPlaceholder });
+    for (const t of teams)
+      map.set(t.externalId, { id: t.id, isPlaceholder: t.isPlaceholder });
 
     // Validar que existan y que sean placeholders
-    const safeToFix: Array<{ matchId: string; homeExt: string; awayExt: string }> = [];
-    const skippedMissingTeams: Array<{ matchId: string; homeExt: string; awayExt: string; reason: string }> = [];
+    const safeToFix: Array<{
+      matchId: string;
+      homeExt: string;
+      awayExt: string;
+    }> = [];
+    const skippedMissingTeams: Array<{
+      matchId: string;
+      homeExt: string;
+      awayExt: string;
+      reason: string;
+    }> = [];
 
     // Validar que existan y que sean placeholders (pero sin tumbar todo el reset)
     for (const row of toFix) {
@@ -462,7 +524,8 @@ export class MatchesService {
           matchId: row.matchId,
           homeExt: row.homeExt,
           awayExt: row.awayExt,
-          reason: `missing team(s): ${!h ? row.homeExt : ''}${!a ? ` ${row.awayExt}` : ''}`.trim(),
+          reason:
+            `missing team(s): ${!h ? row.homeExt : ''}${!a ? ` ${row.awayExt}` : ''}`.trim(),
         });
         continue;
       }
@@ -472,7 +535,8 @@ export class MatchesService {
           matchId: row.matchId,
           homeExt: row.homeExt,
           awayExt: row.awayExt,
-          reason: `not placeholder: ${!h.isPlaceholder ? row.homeExt : ''}${!a.isPlaceholder ? ` ${row.awayExt}` : ''}`.trim(),
+          reason:
+            `not placeholder: ${!h.isPlaceholder ? row.homeExt : ''}${!a.isPlaceholder ? ` ${row.awayExt}` : ''}`.trim(),
         });
         continue;
       }
@@ -534,11 +598,14 @@ export class MatchesService {
     // (si tu slug es "baseball" o "beisbol", cubrimos ambos)
     const seasonSport = await this.prisma.season.findUnique({
       where: { id: match.seasonId },
-      select: { competition: { select: { sport: { select: { slug: true } } } } },
+      select: {
+        competition: { select: { sport: { select: { slug: true } } } },
+      },
     });
 
-    const sportSlug = seasonSport?.competition?.sport?.slug?.toLowerCase() ?? "";
-    const isBaseball = sportSlug === "baseball" || sportSlug === "beisbol";
+    const sportSlug =
+      seasonSport?.competition?.sport?.slug?.toLowerCase() ?? '';
+    const isBaseball = sportSlug === 'baseball' || sportSlug === 'beisbol';
 
     if (
       isBaseball &&
@@ -547,7 +614,9 @@ export class MatchesService {
       dto.awayScore != null &&
       dto.homeScore === dto.awayScore
     ) {
-      throw new BadRequestException("En béisbol no se permite empate. Debes cargar un ganador.");
+      throw new BadRequestException(
+        'En béisbol no se permite empate. Debes cargar un ganador.',
+      );
     }
 
     // ✅ Validación por deporte: BÉISBOL no permite empates (ni en grupos ni en KO)
@@ -598,7 +667,7 @@ export class MatchesService {
         await this.trySyncR32MatchTeamsFromBracketSlots({
           matchId: match.id,
           seasonId: match.seasonId,
-          matchNumber: (match as any).matchNumber ?? null,
+          matchNumber: match.matchNumber ?? null,
         });
 
         // Releer match (para refrescar isPlaceholder/placeholderRule)
@@ -612,14 +681,18 @@ export class MatchesService {
             awayTeamId: true,
             homeScore: true,
             awayScore: true,
-            homeTeam: { select: { isPlaceholder: true, placeholderRule: true } },
-            awayTeam: { select: { isPlaceholder: true, placeholderRule: true } },
+            homeTeam: {
+              select: { isPlaceholder: true, placeholderRule: true },
+            },
+            awayTeam: {
+              select: { isPlaceholder: true, placeholderRule: true },
+            },
             matchNumber: true,
             resultConfirmed: true,
             advanceTeamId: true,
             advanceMethod: true,
           },
-        }) as any;
+        });
 
         if (!match) {
           throw new BadRequestException('Match not found');
@@ -632,10 +705,12 @@ export class MatchesService {
     // ✅ Permite placeholders "estáticos" tipo REPECHAJE (porque no se resuelven por grupos).
     if (isAnyResultFieldPresent(dto)) {
       const homeIsDynamicPlaceholder =
-        !!match.homeTeam?.isPlaceholder && isDynamicPlaceholder(match.homeTeam?.placeholderRule);
+        !!match.homeTeam?.isPlaceholder &&
+        isDynamicPlaceholder(match.homeTeam?.placeholderRule);
 
       const awayIsDynamicPlaceholder =
-        !!match.awayTeam?.isPlaceholder && isDynamicPlaceholder(match.awayTeam?.placeholderRule);
+        !!match.awayTeam?.isPlaceholder &&
+        isDynamicPlaceholder(match.awayTeam?.placeholderRule);
 
       if (homeIsDynamicPlaceholder || awayIsDynamicPlaceholder) {
         const h = match.homeTeam?.placeholderRule ?? 'HOME placeholder';
@@ -657,7 +732,11 @@ export class MatchesService {
         // Si por alguna razón no hay partidos en la fase previa, no bloqueamos
         if (totalPrev > 0) {
           const confirmedPrev = await this.prisma.match.count({
-            where: { seasonId: match.seasonId, phaseCode: prev, resultConfirmed: true },
+            where: {
+              seasonId: match.seasonId,
+              phaseCode: prev,
+              resultConfirmed: true,
+            },
           });
 
           if (confirmedPrev < totalPrev) {
@@ -690,10 +769,17 @@ export class MatchesService {
         advanceMethod = null;
       } else {
         if (!dto.advanceTeamId) {
-          throw new BadRequestException('KO: advanceTeamId es requerido cuando hay empate');
+          throw new BadRequestException(
+            'KO: advanceTeamId es requerido cuando hay empate',
+          );
         }
-        if (dto.advanceTeamId !== match.homeTeamId && dto.advanceTeamId !== match.awayTeamId) {
-          throw new BadRequestException('KO: advanceTeamId inválido (debe ser homeTeamId o awayTeamId)');
+        if (
+          dto.advanceTeamId !== match.homeTeamId &&
+          dto.advanceTeamId !== match.awayTeamId
+        ) {
+          throw new BadRequestException(
+            'KO: advanceTeamId inválido (debe ser homeTeamId o awayTeamId)',
+          );
         }
 
         advanceTeamId = dto.advanceTeamId;
@@ -701,7 +787,8 @@ export class MatchesService {
       }
     }
 
-    const willBeConfirmed = dto.resultConfirmed ?? match.resultConfirmed ?? false;
+    const willBeConfirmed =
+      dto.resultConfirmed ?? match.resultConfirmed ?? false;
 
     const updated = await this.prisma.match.update({
       where: { id: matchId },
@@ -711,6 +798,10 @@ export class MatchesService {
         resultConfirmed: dto.resultConfirmed,
         advanceTeamId,
         advanceMethod,
+        homeHits: dto.homeHits,
+        awayHits: dto.awayHits,
+        homeErrors: dto.homeErrors,
+        awayErrors: dto.awayErrors,
       },
     });
 
@@ -721,19 +812,21 @@ export class MatchesService {
     if (isKO && willBeConfirmed && advanceTeamId) {
       await this.propagateWinnerToNextMatches({
         seasonId: match.seasonId,
-        sourceMatchNumber: (match as any).matchNumber ?? null,
+        sourceMatchNumber: match.matchNumber ?? null,
         winnerTeamId: advanceTeamId,
       });
 
       // ✅ 3er lugar: cuando confirmas una semifinal (F05), el perdedor alimenta el partido de 3er puesto (F06)
       if (match.phaseCode === 'F05') {
         const loserTeamId =
-          advanceTeamId === match.homeTeamId ? match.awayTeamId : match.homeTeamId;
+          advanceTeamId === match.homeTeamId
+            ? match.awayTeamId
+            : match.homeTeamId;
 
         if (loserTeamId) {
           await this.propagateLoserToNextMatches({
             seasonId: match.seasonId,
-            sourceMatchNumber: (match as any).matchNumber ?? null,
+            sourceMatchNumber: match.matchNumber ?? null,
             loserTeamId,
             winnerTeamId: advanceTeamId,
           });
@@ -742,6 +835,5 @@ export class MatchesService {
     }
 
     return updated;
-
   }
 }

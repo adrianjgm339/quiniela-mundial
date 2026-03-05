@@ -194,7 +194,17 @@ export async function listPicks(token: string, leagueId: string) {
 
 export async function upsertPick(
   token: string,
-  input: { leagueId: string; matchId: string; homePred: number; awayPred: number; koWinnerTeamId?: string | null },
+  input: {
+    leagueId: string;
+    matchId: string;
+    homePred: number;
+    awayPred: number;
+    koWinnerTeamId?: string | null;
+
+    // Béisbol (totales del juego)
+    predTotalHits?: number | null;
+    predTotalErrors?: number | null;
+  },
 ) {
   const res = await fetch(`${API_BASE}/picks`, {
     method: 'PUT',
@@ -220,6 +230,8 @@ export type ApiPick = {
   status: 'VALID' | 'LATE' | 'VOID';
   koWinnerTeamId?: string | null;
   updatedAt: string;
+  predTotalHits?: number | null;
+  predTotalErrors?: number | null;
 };
 
 export type ApiLeague = {

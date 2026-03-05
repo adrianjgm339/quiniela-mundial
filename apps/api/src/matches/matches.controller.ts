@@ -1,11 +1,22 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { MatchesService } from './matches.service';
 import { UpdateMatchResultDto } from './dto/update-match-result.dto';
 
 @Controller('matches')
 export class MatchesController {
-  constructor(private readonly matches: MatchesService) { }
+  constructor(private readonly matches: MatchesService) {}
 
   @UseGuards(JwtAuthGuard)
   @Get()
@@ -62,5 +73,4 @@ export class MatchesController {
 
     return this.matches.resetKo({ seasonId, mode });
   }
-
 }

@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Patch,
-  Body,
-  UseGuards,
-  Req,
-} from '@nestjs/common';
+import { Controller, Patch, Body, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { UsersService } from './users.service';
 
@@ -14,13 +8,7 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @Patch('me/active-season')
-  setActiveSeason(
-    @Req() req,
-    @Body() body: { seasonId: string },
-  ) {
-    return this.usersService.setActiveSeason(
-      req.user.userId,
-      body.seasonId,
-    );
+  setActiveSeason(@Req() req, @Body() body: { seasonId: string }) {
+    return this.usersService.setActiveSeason(req.user.userId, body.seasonId);
   }
 }

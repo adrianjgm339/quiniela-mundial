@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -22,12 +26,19 @@ async function ensureUniqueSlug(
 ) {
   const safeBase = baseSlugifyFallback(baseSlug);
   let slug = safeBase;
+
   for (let i = 0; i < 50; i++) {
-    // @ts-expect-error dynamic model access
-    const exists = await prisma[model].findUnique({ where: { slug } });
+    const exists =
+      model === 'sport'
+        ? await prisma.sport.findUnique({ where: { slug } })
+        : model === 'competition'
+          ? await prisma.competition.findUnique({ where: { slug } })
+          : await prisma.season.findUnique({ where: { slug } });
+
     if (!exists) return slug;
     slug = `${safeBase}-${i + 2}`;
   }
+
   throw new BadRequestException('No se pudo generar un slug único');
 }
 
@@ -52,7 +63,8 @@ function normalizeTranslations(names: LocaleNameMap) {
     if (!v) continue;
     out.push({ locale: locale.trim(), name: v });
   }
-  if (!out.length) throw new BadRequestException('Debe indicar al menos un nombre');
+  if (!out.length)
+    throw new BadRequestException('Debe indicar al menos un nombre');
   return out;
 }
 
@@ -99,7 +111,8 @@ export class CatalogService {
         seasons: c.seasons.map((se) => ({
           id: se.id,
           slug: se.slug,
-          name: se.translations.find((t) => t.locale === locale)?.name ?? se.slug,
+          name:
+            se.translations.find((t) => t.locale === locale)?.name ?? se.slug,
           defaultScoringRuleId: se.defaultScoringRuleId,
         })),
       })),
@@ -149,7 +162,9 @@ export class CatalogService {
     });
     if (!sport) throw new NotFoundException('Sport no encontrado');
 
-    const seasonIds = sport.competitions.flatMap((c) => c.seasons.map((s) => s.id));
+    const seasonIds = sport.competitions.flatMap((c) =>
+      c.seasons.map((s) => s.id),
+    );
     if (seasonIds.length) {
       const hasData = await this.prisma.season.findFirst({
         where: {
@@ -175,7 +190,9 @@ export class CatalogService {
     // borrado ordenado (sin depender de onDelete cascade)
     return this.prisma.$transaction(async (tx) => {
       if (seasonIds.length) {
-        await tx.seasonTranslation.deleteMany({ where: { seasonId: { in: seasonIds } } });
+        await tx.seasonTranslation.deleteMany({
+          where: { seasonId: { in: seasonIds } },
+        });
         await tx.season.deleteMany({ where: { id: { in: seasonIds } } });
       }
 
@@ -184,7 +201,9 @@ export class CatalogService {
         await tx.competitionTranslation.deleteMany({
           where: { competitionId: { in: competitionIds } },
         });
-        await tx.competition.deleteMany({ where: { id: { in: competitionIds } } });
+        await tx.competition.deleteMany({
+          where: { id: { in: competitionIds } },
+        });
       }
 
       await tx.sportTranslation.deleteMany({ where: { sportId: id } });
@@ -198,7 +217,9 @@ export class CatalogService {
   // CRUD COMPETITION
   // ---------------------------
   async createCompetition(input: { sportId: string; names: LocaleNameMap }) {
-    const sport = await this.prisma.sport.findUnique({ where: { id: input.sportId } });
+    const sport = await this.prisma.sport.findUnique({
+      where: { id: input.sportId },
+    });
     if (!sport) throw new BadRequestException('sportId inválido');
 
     const translations = normalizeTranslations(input.names);
@@ -216,7 +237,9 @@ export class CatalogService {
   }
 
   async updateCompetition(id: string, input: { names: LocaleNameMap }) {
-    const existing = await this.prisma.competition.findUnique({ where: { id } });
+    const existing = await this.prisma.competition.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException('Competición no encontrada');
 
     const translations = normalizeTranslations(input.names);
@@ -265,10 +288,14 @@ export class CatalogService {
 
     return this.prisma.$transaction(async (tx) => {
       if (seasonIds.length) {
-        await tx.seasonTranslation.deleteMany({ where: { seasonId: { in: seasonIds } } });
+        await tx.seasonTranslation.deleteMany({
+          where: { seasonId: { in: seasonIds } },
+        });
         await tx.season.deleteMany({ where: { id: { in: seasonIds } } });
       }
-      await tx.competitionTranslation.deleteMany({ where: { competitionId: id } });
+      await tx.competitionTranslation.deleteMany({
+        where: { competitionId: id },
+      });
       await tx.competition.delete({ where: { id } });
       return { ok: true };
     });
@@ -284,8 +311,9 @@ export class CatalogService {
     endDate?: string | null;
     defaultScoringRuleId?: string;
   }) {
-
-    const comp = await this.prisma.competition.findUnique({ where: { id: input.competitionId } });
+    const comp = await this.prisma.competition.findUnique({
+      where: { id: input.competitionId },
+    });
     if (!comp) throw new BadRequestException('competitionId inválido');
 
     const translations = normalizeTranslations(input.names);
@@ -297,7 +325,9 @@ export class CatalogService {
       throw new BadRequestException('defaultScoringRuleId es requerido');
     }
 
-    const ruleExists = await this.prisma.scoringRule.findUnique({ where: { id: ruleId } });
+    const ruleExists = await this.prisma.scoringRule.findUnique({
+      where: { id: ruleId },
+    });
     if (!ruleExists) {
       throw new BadRequestException(`defaultScoringRuleId inválido: ${ruleId}`);
     }
@@ -332,11 +362,19 @@ export class CatalogService {
     let nextRuleId: string | undefined = undefined;
 
     if (input.defaultScoringRuleId !== undefined) {
-      const ruleId = (input.defaultScoringRuleId ?? "").trim();
-      if (!ruleId) throw new BadRequestException("defaultScoringRuleId no puede ser vacío");
+      const ruleId = (input.defaultScoringRuleId ?? '').trim();
+      if (!ruleId)
+        throw new BadRequestException(
+          'defaultScoringRuleId no puede ser vacío',
+        );
 
-      const ruleExists = await this.prisma.scoringRule.findUnique({ where: { id: ruleId } });
-      if (!ruleExists) throw new BadRequestException(`defaultScoringRuleId inválido: ${ruleId}`);
+      const ruleExists = await this.prisma.scoringRule.findUnique({
+        where: { id: ruleId },
+      });
+      if (!ruleExists)
+        throw new BadRequestException(
+          `defaultScoringRuleId inválido: ${ruleId}`,
+        );
 
       nextRuleId = ruleId;
     }
@@ -344,8 +382,18 @@ export class CatalogService {
     return this.prisma.season.update({
       where: { id },
       data: {
-        startDate: input.startDate !== undefined ? (input.startDate ? new Date(input.startDate) : null) : undefined,
-        endDate: input.endDate !== undefined ? (input.endDate ? new Date(input.endDate) : null) : undefined,
+        startDate:
+          input.startDate !== undefined
+            ? input.startDate
+              ? new Date(input.startDate)
+              : null
+            : undefined,
+        endDate:
+          input.endDate !== undefined
+            ? input.endDate
+              ? new Date(input.endDate)
+              : null
+            : undefined,
         defaultScoringRuleId: nextRuleId,
         translations: {
           deleteMany: {},

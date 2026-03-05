@@ -1,7 +1,14 @@
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsUUID,
+  Min,
+} from 'class-validator';
 
 export enum MatchAdvanceMethodDto {
-  ET = 'ET',   // Prórroga
+  ET = 'ET', // Prórroga
   PEN = 'PEN', // Penales
 }
 
@@ -15,6 +22,27 @@ export class UpdateMatchResultDto {
   @IsInt()
   @Min(0)
   awayScore?: number;
+
+  // Béisbol: stats oficiales (se guardan como home/away; el total se calcula luego)
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  homeHits?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  awayHits?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  homeErrors?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  awayErrors?: number;
 
   @IsOptional()
   @IsBoolean()

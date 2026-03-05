@@ -7,7 +7,7 @@ import { ManualThirdsDto } from './dto/manual-thirds.dto';
 
 @Controller('admin/groups')
 export class AdminGroupsController {
-  constructor(private readonly svc: AdminGroupsService) { }
+  constructor(private readonly svc: AdminGroupsService) {}
 
   @UseGuards(JwtAuthGuard)
   @Get('standings')
@@ -51,7 +51,11 @@ export class AdminGroupsController {
 
   @UseGuards(JwtAuthGuard)
   @Post('close')
-  close(@Req() req: any, @Query('seasonId') seasonId?: string, @Query('locale') locale: string = 'es') {
+  close(
+    @Req() req: any,
+    @Query('seasonId') seasonId?: string,
+    @Query('locale') locale: string = 'es',
+  ) {
     const userId = req.user?.userId ?? req.user?.id ?? req.user?.sub;
     return this.svc.closeGroups({ userId, seasonId, locale });
   }
@@ -79,5 +83,4 @@ export class AdminGroupsController {
     const userId = req.user?.userId ?? req.user?.id ?? req.user?.sub;
     return this.svc.setManualThirds({ userId, dto });
   }
-
 }

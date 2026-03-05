@@ -6,12 +6,14 @@ import {
   getCatalog,
   getMatches,
   getMyLeagues,
+  getScoringRule,
   listPicks,
   setActiveSeason,
   upsertPick,
   type ApiMatch,
   type ApiPick,
   type ApiLeague,
+  type ApiScoringRule,
   type CatalogSport,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -149,6 +151,8 @@ export default function MatchesPage() {
   const [token, setToken] = useState<string | null>(null);
   const [leagues, setLeagues] = useState<ApiLeague[]>([]);
   const [loadingPicks, setLoadingPicks] = useState(false);
+  const [activeRule, setActiveRule] = useState<ApiScoringRule | null>(null);
+  const [loadingRule, setLoadingRule] = useState(false);
 
   // Cascada Sport → Competition → Season (Evento)
   const [catalog, setCatalog] = useState<CatalogSport[]>([]);
@@ -165,6 +169,17 @@ export default function MatchesPage() {
     const c = competitionOptions.find((x) => x.id === competitionId);
     return c?.seasons ?? [];
   }, [competitionOptions, competitionId]);
+
+  const seasonDefaultRuleId = useMemo(() => {
+    if (!seasonId) return null;
+    for (const s of catalog ?? []) {
+      for (const c of s.competitions ?? []) {
+        const se = (c.seasons ?? []).find((x) => x.id === seasonId);
+        if (se?.defaultScoringRuleId) return se.defaultScoringRuleId;
+      }
+    }
+    return null;
+  }, [catalog, seasonId]);
 
   const isBaseballContext = useMemo(() => {
     const name = (catalog.find((s) => s.id === sportId)?.name ?? '').toLowerCase();
@@ -225,6 +240,8 @@ export default function MatchesPage() {
   const [homePred, setHomePred] = useState<string>('');
   const [koWinnerTeamId, setKoWinnerTeamId] = useState<string>(''); // '' | teamId
   const [awayPred, setAwayPred] = useState<string>('');
+  const [predTotalHits, setPredTotalHits] = useState<string>('');      // '' | number
+  const [predTotalErrors, setPredTotalErrors] = useState<string>('');  // '' | number
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -338,30 +355,26 @@ export default function MatchesPage() {
 
         const leaguesInSeason = leagues.filter((l) => (l as unknown as { seasonId?: string | null }).seasonId === seasonId);
 
-        const keepRestoredLeague =
-          appliedLeaguesContextRef.current &&
-          leagueConfirmed &&
-          leagueId &&
-          leaguesInSeason.some((l) => l.id === leagueId);
+        const storedLeagueId = localStorage.getItem('activeLeagueId');
+
+        const storedLeagueOk =
+          !!storedLeagueId && leaguesInSeason.some((l) => l.id === storedLeagueId);
 
         let nextLeagueId: string | null = null;
 
-        if (keepRestoredLeague) {
-          nextLeagueId = leagueId;
+        if (storedLeagueOk) {
+          nextLeagueId = storedLeagueId as string;
+        } else if (leaguesInSeason.length === 1) {
+          nextLeagueId = leaguesInSeason[0].id;
         } else {
-          if (leaguesInSeason.length === 1) {
-            nextLeagueId = leaguesInSeason[0].id;
-          } else {
-            nextLeagueId = null;
-            localStorage.removeItem('activeLeagueId');
-          }
-
-          setLeagueId(nextLeagueId);
-          setLeagueConfirmed(!!nextLeagueId);
+          nextLeagueId = null;
         }
 
+        setLeagueId(nextLeagueId);
+        setLeagueConfirmed(!!nextLeagueId);
+
         if (nextLeagueId) localStorage.setItem('activeLeagueId', nextLeagueId);
-        else if (!keepRestoredLeague) localStorage.removeItem('activeLeagueId');
+        else localStorage.removeItem('activeLeagueId');
 
         // Limpiar picks visibles mientras cambia liga/evento
         setPicksByMatchId({});
@@ -516,6 +529,11 @@ export default function MatchesPage() {
     setAwayPred(existing ? String(existing.awayPred) : '');
     setKoWinnerTeamId(existing?.koWinnerTeamId ?? '');
 
+    const ex = existing as unknown as { predTotalHits?: number | null; predTotalErrors?: number | null };
+
+    setPredTotalHits(ex?.predTotalHits == null ? '' : String(ex.predTotalHits));
+    setPredTotalErrors(ex?.predTotalErrors == null ? '' : String(ex.predTotalErrors));
+
     setOpen(true);
   }
 
@@ -540,6 +558,23 @@ export default function MatchesPage() {
 
     const hpRaw = homePred.trim();
     const apRaw = awayPred.trim();
+
+    const thRaw = predTotalHits.trim();
+    const teRaw = predTotalErrors.trim();
+
+    const th = thRaw === '' ? null : Number(thRaw);
+    const te = teRaw === '' ? null : Number(teRaw);
+
+    const invalidInt = (n: number | null) => n !== null && (!Number.isFinite(n) || !Number.isInteger(n) || n < 0);
+
+    if (showPredTotalHits && invalidInt(th)) {
+      setSaveError('Total Hits debe ser un entero >= 0 (o dejarse vacío).');
+      return;
+    }
+    if (showPredTotalErrors && invalidInt(te)) {
+      setSaveError('Total Errores debe ser un entero >= 0 (o dejarse vacío).');
+      return;
+    }
 
     const hp = hpRaw === '' ? null : Number(hpRaw);
     const ap = apRaw === '' ? null : Number(apRaw);
@@ -579,9 +614,14 @@ export default function MatchesPage() {
         homePred: hp,
         awayPred: ap,
         koWinnerTeamId: finalKoWinnerTeamId,
+
+        // Béisbol (totales del juego) — solo aplica si la regla da puntos
+        predTotalHits: showPredTotalHits ? th : undefined,
+        predTotalErrors: showPredTotalErrors ? te : undefined,
       });
 
       setPicksByMatchId((prev) => ({ ...prev, [pick.matchId]: pick }));
+      setPicksLeagueId(effectiveLeagueId);
       setOpen(false);
       setSelected(null);
     } catch (e: unknown) {
@@ -602,6 +642,93 @@ export default function MatchesPage() {
   }
 
   const activeLeague = effectiveLeagueId ? leagues.find((l) => l.id === effectiveLeagueId) : null;
+
+  useEffect(() => {
+    if (!token) return;
+    if (!seasonId) return;
+
+    // ruleId efectivo: preferimos regla por liga; si no, default del evento (season)
+    const leagueRuleId = (activeLeague as unknown as { scoringRuleId?: string | null })?.scoringRuleId ?? null;
+    const ruleId = leagueRuleId || seasonDefaultRuleId;
+
+    if (!ruleId) {
+      setActiveRule(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        setLoadingRule(true);
+        const rule = await getScoringRule(token, ruleId);
+        if (!cancelled) setActiveRule(rule);
+      } catch {
+        if (!cancelled) setActiveRule(null);
+      } finally {
+        if (!cancelled) setLoadingRule(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, seasonId, activeLeague, seasonDefaultRuleId]);
+
+  function extractRuleDetails(raw: unknown): unknown[] {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+
+    if (isRecord(raw)) {
+      const v =
+        raw.details ??
+        raw.scoringRuleDetails ??
+        raw.ruleDetails ??
+        (isRecord(raw.scoringRule) ? raw.scoringRule.details : undefined);
+
+      if (Array.isArray(v)) return v;
+    }
+    return [];
+  }
+
+  function asUpperCode(v: unknown): string {
+    return typeof v === 'string' ? v.trim().toUpperCase() : '';
+  }
+
+  function asNumber(v: unknown): number | null {
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  }
+
+  const scoringPoints = useMemo(() => {
+    // Default ultra-seguro: si no encontramos detalles, NO mostramos inputs.
+    let hits = 0;
+    let errors = 0;
+
+    const details = extractRuleDetails(activeRule as unknown);
+
+    for (const d0 of details) {
+      if (!isRecord(d0)) continue;
+
+      const code =
+        asUpperCode(d0.code) ||
+        asUpperCode(d0.conceptCode) ||
+        asUpperCode(d0.scoringConceptCode);
+
+      const pts =
+        asNumber(d0.points) ??
+        asNumber(d0.value) ??
+        0;
+
+      // Soportamos nombres comunes + tu DB (ERRORES)
+      if (code === 'HITS' || code === 'HITS_TOTAL' || code === 'TOTAL_HITS') hits = Math.max(hits, pts);
+      if (code === 'ERRORES' || code === 'ERRORS' || code === 'ERRORS_TOTAL' || code === 'TOTAL_ERRORS') errors = Math.max(errors, pts);
+    }
+
+    return { hits, errors };
+  }, [activeRule]);
+
+  const showPredTotalHits = isBaseballContext && scoringPoints.hits > 0;
+  const showPredTotalErrors = isBaseballContext && scoringPoints.errors > 0;
 
   const aiContext = useMemo(() => {
     const sel = selected as MatchWithExtras | null;
@@ -921,7 +1048,7 @@ export default function MatchesPage() {
                   {matches.map((m0) => {
                     const m = m0 as MatchWithExtras;
 
-                    const myPick = effectiveLeagueId && picksLeagueId === effectiveLeagueId ? picksByMatchId[m.id] : undefined;
+                    const myPick = effectiveLeagueId ? picksByMatchId[m.id] : undefined;
                     const locked = isLocked(m);
 
                     const kickoffLabel = formatLocalDateTime(locale, m.utcDateTime ?? m.timeUtc ?? null);
@@ -955,7 +1082,21 @@ export default function MatchesPage() {
 
                           {effectiveLeagueId && myPick && (
                             <div className="mt-1 text-sm text-[color:var(--accent)]">
-                              Tu pick: {myPick.homePred} - {myPick.awayPred}
+                              <div className="mt-1 text-sm text-[color:var(--accent)]">
+                                Tu pick: {myPick.homePred} - {myPick.awayPred}
+                                {(myPick as unknown as { predTotalHits?: number | null }).predTotalHits != null && (
+                                  <span className="text-[color:var(--muted)]">
+                                    {' '}
+                                    · H: {(myPick as unknown as { predTotalHits?: number | null }).predTotalHits}
+                                  </span>
+                                )}
+                                {(myPick as unknown as { predTotalErrors?: number | null }).predTotalErrors != null && (
+                                  <span className="text-[color:var(--muted)]">
+                                    {' '}
+                                    · E: {(myPick as unknown as { predTotalErrors?: number | null }).predTotalErrors}
+                                  </span>
+                                )}
+                              </div>
                               <span className="text-[color:var(--muted)]"> · {myPick.status}</span>
                             </div>
                           )}
@@ -1106,6 +1247,53 @@ export default function MatchesPage() {
                     className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
                   />
                 </div>
+
+                {(showPredTotalHits || showPredTotalErrors) && (
+                  <Card className="col-span-2 mt-1 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-medium text-[var(--foreground)]">Totales del juego</div>
+                      <div className="text-xs text-[color:var(--muted)]">Solo aparece si la regla da puntos</div>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-2 gap-3">
+                      {showPredTotalHits ? (
+                        <div>
+                          <div className="text-sm text-[color:var(--muted)]">Total Hits</div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={99}
+                            value={predTotalHits}
+                            onChange={(e) => setPredTotalHits(e.target.value)}
+                            disabled={selectedLocked}
+                            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                            placeholder="Ej: 14"
+                          />
+                        </div>
+                      ) : (
+                        <div />
+                      )}
+
+                      {showPredTotalErrors ? (
+                        <div>
+                          <div className="text-sm text-[color:var(--muted)]">Total Errores</div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={99}
+                            value={predTotalErrors}
+                            onChange={(e) => setPredTotalErrors(e.target.value)}
+                            disabled={selectedLocked}
+                            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
+                            placeholder="Ej: 2"
+                          />
+                        </div>
+                      ) : (
+                        <div />
+                      )}
+                    </div>
+                  </Card>
+                )}
 
                 {(() => {
                   const sel = selected as MatchWithExtras;

@@ -53,10 +53,9 @@ export class AiService {
     // OPENAI
     if (!this.openai) {
       return {
-        reply:
-          dto?.locale?.startsWith('en')
-            ? 'AI assistant will be available soon. 🙌'
-            : 'El asistente virtual de IA estará disponible próximamente. 🙌',
+        reply: dto?.locale?.startsWith('en')
+          ? 'AI assistant will be available soon. 🙌'
+          : 'El asistente virtual de IA estará disponible próximamente. 🙌',
       };
     }
 
@@ -69,7 +68,7 @@ export class AiService {
   private mockReply(dto: AiChatDto) {
     const locale = dto?.locale || 'es';
     const ctx = dto?.context || {};
-    const selected = (ctx as any)?.selectedMatch;
+    const selected = ctx?.selectedMatch;
 
     if (selected?.homeTeamName && selected?.awayTeamName) {
       return locale.startsWith('es')
@@ -87,7 +86,8 @@ export class AiService {
   // -----------------------
   private async hfReply(dto: AiChatDto): Promise<string> {
     const token = process.env.HF_TOKEN;
-    const model = process.env.HF_MODEL || 'meta-llama/Meta-Llama-3.1-8B-Instruct';
+    const model =
+      process.env.HF_MODEL || 'meta-llama/Meta-Llama-3.1-8B-Instruct';
 
     if (!token) {
       throw new ServiceUnavailableException(
@@ -145,8 +145,9 @@ export class AiService {
       }
 
       // HF suele devolver [{generated_text: "..."}]
-      const generated =
-        Array.isArray(data) ? data?.[0]?.generated_text : data?.generated_text;
+      const generated = Array.isArray(data)
+        ? data?.[0]?.generated_text
+        : data?.generated_text;
 
       const reply = (generated || '').toString().trim();
       return reply || '…';

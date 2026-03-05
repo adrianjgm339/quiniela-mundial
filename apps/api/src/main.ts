@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
+import { ValidationPipe } from '@nestjs/common';
 
 // 1) intenta .env en CWD (si arrancas desde apps/api)
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
@@ -12,6 +13,14 @@ dotenv.config({ path: path.resolve(process.cwd(), 'apps/api/.env') });
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
 
   // CORS: el "origin" NO incluye path (ej: NO "/es").
   // Además, los Preview de Vercel cambian de subdominio, así que usamos regex.
@@ -31,9 +40,8 @@ async function bootstrap() {
       ]);
 
       // Permite previews del proyecto web (Vercel) con variaciones del subdominio
-      const isWebPreview = /^https:\/\/quiniela-mundial-we-.*\.vercel\.app$/i.test(
-        origin,
-      );
+      const isWebPreview =
+        /^https:\/\/quiniela-mundial-we-.*\.vercel\.app$/i.test(origin);
 
       // Importante: devolver el ORIGIN (string) para que el middleware emita:
       // Access-Control-Allow-Origin: <origin>
@@ -42,7 +50,8 @@ async function bootstrap() {
       return cb(new Error(`CORS blocked: ${origin}`), false);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Authorization, Accept, Origin, X-Requested-With',
+    allowedHeaders:
+      'Content-Type, Authorization, Accept, Origin, X-Requested-With',
     credentials: true,
   });
 

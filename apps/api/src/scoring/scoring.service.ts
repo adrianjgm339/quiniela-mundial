@@ -10,12 +10,19 @@ function genCustomRuleId() {
   const yy = String(d.getFullYear()).slice(-2);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  const suffix = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  const suffix = Math.random()
+    .toString(36)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 5);
   return `C${yy}${mm}${dd}-${suffix}`;
 }
 
-function validateCustomDetails(details: Array<{ code: string; points: number }>) {
-  if (!Array.isArray(details) || details.length === 0) throw new BadRequestException('details requerido');
+function validateCustomDetails(
+  details: Array<{ code: string; points: number }>,
+) {
+  if (!Array.isArray(details) || details.length === 0)
+    throw new BadRequestException('details requerido');
 
   let hasPositive = false;
 
@@ -26,11 +33,15 @@ function validateCustomDetails(details: Array<{ code: string; points: number }>)
     if (!code) throw new BadRequestException('code requerido');
     if (!Number.isFinite(points) || !Number.isInteger(points))
       throw new BadRequestException(`points inválido para ${code}`);
-    if (points < 0) throw new BadRequestException(`points no puede ser negativo (${code})`);
+    if (points < 0)
+      throw new BadRequestException(`points no puede ser negativo (${code})`);
     if (points > 0) hasPositive = true;
   }
 
-  if (!hasPositive) throw new BadRequestException('Debes asignar puntos (>0) a al menos 1 concepto.');
+  if (!hasPositive)
+    throw new BadRequestException(
+      'Debes asignar puntos (>0) a al menos 1 concepto.',
+    );
 }
 
 function outcome(h: number, a: number) {
@@ -42,25 +53,42 @@ function outcome(h: number, a: number) {
 // sin depender del nombre exacto del campo (así evitamos errores).
 function getMatchScore(m: any): Score | null {
   // 1) campos comunes
-  if (typeof m.homeScore === 'number' && typeof m.awayScore === 'number') return { home: m.homeScore, away: m.awayScore };
-  if (typeof m.scoreHome === 'number' && typeof m.scoreAway === 'number') return { home: m.scoreHome, away: m.scoreAway };
+  if (typeof m.homeScore === 'number' && typeof m.awayScore === 'number')
+    return { home: m.homeScore, away: m.awayScore };
+  if (typeof m.scoreHome === 'number' && typeof m.scoreAway === 'number')
+    return { home: m.scoreHome, away: m.scoreAway };
 
   // 2) si guardas algo tipo score JSON
-  if (m.score && typeof m.score.home === 'number' && typeof m.score.away === 'number') return { home: m.score.home, away: m.score.away };
+  if (
+    m.score &&
+    typeof m.score.home === 'number' &&
+    typeof m.score.away === 'number'
+  )
+    return { home: m.score.home, away: m.score.away };
 
   // 3) si guardas scores como JSON (ajusta si aplica)
   // ejemplo: m.scores = { home: 1, away: 2 } o similar
-  if (m.scores && typeof m.scores.home === 'number' && typeof m.scores.away === 'number') return { home: m.scores.home, away: m.scores.away };
+  if (
+    m.scores &&
+    typeof m.scores.home === 'number' &&
+    typeof m.scores.away === 'number'
+  )
+    return { home: m.scores.home, away: m.scores.away };
 
   return null;
 }
 
-function computePoints(rule: RuleMap, pick: { homePred: number; awayPred: number }, score: Score): number {
+function computePoints(
+  rule: RuleMap,
+  pick: { homePred: number; awayPred: number },
+  score: Score,
+): number {
   let pts = 0;
 
   const exact = pick.homePred === score.home && pick.awayPred === score.away;
-  const resultOk = outcome(pick.homePred, pick.awayPred) === outcome(score.home, score.away);
-  const diffOk = (pick.homePred - pick.awayPred) === (score.home - score.away);
+  const resultOk =
+    outcome(pick.homePred, pick.awayPred) === outcome(score.home, score.away);
+  const diffOk = pick.homePred - pick.awayPred === score.home - score.away;
   const homeOk = pick.homePred === score.home;
   const awayOk = pick.awayPred === score.away;
 
@@ -83,7 +111,41 @@ function computePoints(rule: RuleMap, pick: { homePred: number; awayPred: number
   return pts;
 }
 
-function computeKoGanadorFinal(rule: RuleMap, match: any, pick: any, score: Score): number {
+function firstRuleCode(
+  rule: RuleMap,
+  codes: string[],
+): { code: string; points: number } | null {
+  for (const c of codes) {
+    const pts = rule[c] ?? 0;
+    if (pts > 0) return { code: c, points: pts };
+  }
+  return null;
+}
+
+function getOfficialTotals(match: any): {
+  totalHits: number | null;
+  totalErrors: number | null;
+} {
+  const hH = match?.homeHits;
+  const aH = match?.awayHits;
+  const hE = match?.homeErrors;
+  const aE = match?.awayErrors;
+
+  const totalHits =
+    typeof hH === 'number' && typeof aH === 'number' ? hH + aH : null;
+
+  const totalErrors =
+    typeof hE === 'number' && typeof aE === 'number' ? hE + aE : null;
+
+  return { totalHits, totalErrors };
+}
+
+function computeKoGanadorFinal(
+  rule: RuleMap,
+  match: any,
+  pick: any,
+  score: Score,
+): number {
   const koPts = rule['KO_GANADOR_FINAL'] ?? 0;
   if (!koPts) return 0; // si la regla no lo tiene o es 0, no hace nada
 
@@ -116,12 +178,18 @@ function computeKoGanadorFinal(rule: RuleMap, match: any, pick: any, score: Scor
   return actualAdvanceTeamId === predictedAdvanceTeamId ? koPts : 0;
 }
 
-function computeBreakdown(rule: RuleMap, match: any, pick: any, score: Score): { total: number; byCode: Record<string, number> } {
+function computeBreakdown(
+  rule: RuleMap,
+  match: any,
+  pick: any,
+  score: Score,
+): { total: number; byCode: Record<string, number> } {
   const byCode: Record<string, number> = {};
 
   const exact = pick.homePred === score.home && pick.awayPred === score.away;
-  const resultOk = outcome(pick.homePred, pick.awayPred) === outcome(score.home, score.away);
-  const diffOk = (pick.homePred - pick.awayPred) === (score.home - score.away);
+  const resultOk =
+    outcome(pick.homePred, pick.awayPred) === outcome(score.home, score.away);
+  const diffOk = pick.homePred - pick.awayPred === score.home - score.away;
   const homeOk = pick.homePred === score.home;
   const awayOk = pick.awayPred === score.away;
 
@@ -130,6 +198,33 @@ function computeBreakdown(rule: RuleMap, match: any, pick: any, score: Score): {
   if (diffOk) byCode['BONUS_DIF'] = rule['BONUS_DIF'] ?? 0;
   if (homeOk) byCode['GOLES_LOCAL'] = rule['GOLES_LOCAL'] ?? 0;
   if (awayOk) byCode['GOLES_VISITA'] = rule['GOLES_VISITA'] ?? 0;
+
+  // ===== BÉISBOL: Totales del juego (Hits / Errores) — exact match =====
+  const { totalHits, totalErrors } = getOfficialTotals(match);
+
+  // HITS: soporta varios codes sin romper seeds viejos
+  const hitRule = firstRuleCode(rule, ['HITS', 'TOTAL_HITS']);
+  if (
+    hitRule &&
+    typeof pick?.predTotalHits === 'number' &&
+    typeof totalHits === 'number'
+  ) {
+    if (pick.predTotalHits === totalHits) {
+      byCode[hitRule.code] = hitRule.points;
+    }
+  }
+
+  // ERRORS: soporta varios codes
+  const errRule = firstRuleCode(rule, ['ERRORS', 'ERRORES', 'TOTAL_ERRORS']);
+  if (
+    errRule &&
+    typeof pick?.predTotalErrors === 'number' &&
+    typeof totalErrors === 'number'
+  ) {
+    if (pick.predTotalErrors === totalErrors) {
+      byCode[errRule.code] = errRule.points;
+    }
+  }
 
   // KO (solo si aplica y existe la regla)
   const koPts = computeKoGanadorFinal(rule, match, pick, score);
@@ -141,7 +236,7 @@ function computeBreakdown(rule: RuleMap, match: any, pick: any, score: Score): {
 
 @Injectable()
 export class ScoringService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) {}
 
   async listRules(seasonId?: string) {
     const rules = await this.prisma.scoringRule.findMany({
@@ -227,7 +322,11 @@ export class ScoringService {
 
       if (details.length) {
         await tx.scoringRuleDetail.createMany({
-          data: details.map((d) => ({ ruleId: id, code: d.code, points: d.points })),
+          data: details.map((d) => ({
+            ruleId: id,
+            code: d.code,
+            points: d.points,
+          })),
         });
       }
 
@@ -256,7 +355,9 @@ export class ScoringService {
     // id automático y único
     let id = genCustomRuleId();
     for (let i = 0; i < 10; i++) {
-      const exists = await this.prisma.scoringRule.findUnique({ where: { id } });
+      const exists = await this.prisma.scoringRule.findUnique({
+        where: { id },
+      });
       if (!exists) break;
       id = genCustomRuleId();
     }
@@ -272,7 +373,11 @@ export class ScoringService {
       });
 
       await tx.scoringRuleDetail.createMany({
-        data: details.map((d) => ({ ruleId: id, code: d.code, points: d.points })),
+        data: details.map((d) => ({
+          ruleId: id,
+          code: d.code,
+          points: d.points,
+        })),
       });
 
       return tx.scoringRule.findUnique({
@@ -282,7 +387,10 @@ export class ScoringService {
     });
   }
 
-  async updateRule(id: string, input: { name?: string; description?: string | null; isGlobal?: boolean }) {
+  async updateRule(
+    id: string,
+    input: { name?: string; description?: string | null; isGlobal?: boolean },
+  ) {
     if (input.isGlobal && id !== 'B01') {
       throw new Error('Solo B01 puede ser global (baseline).');
     }
@@ -291,14 +399,19 @@ export class ScoringService {
       where: { id },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
         ...(input.isGlobal !== undefined ? { isGlobal: input.isGlobal } : {}),
       },
       include: { details: true },
     });
   }
 
-  async setRuleDetails(ruleId: string, details: Array<{ code: string; points: number }>) {
+  async setRuleDetails(
+    ruleId: string,
+    details: Array<{ code: string; points: number }>,
+  ) {
     const clean = details.map((d) => ({
       code: String(d.code).trim(),
       points: Number(d.points),
@@ -307,7 +420,8 @@ export class ScoringService {
     // Validación básica
     for (const d of clean) {
       if (!d.code) throw new Error('code requerido');
-      if (!Number.isFinite(d.points) || !Number.isInteger(d.points)) throw new Error(`points inválido para ${d.code}`);
+      if (!Number.isFinite(d.points) || !Number.isInteger(d.points))
+        throw new Error(`points inválido para ${d.code}`);
     }
 
     // Reemplazo total (más simple y consistente)
@@ -342,15 +456,20 @@ export class ScoringService {
     const matchById = new Map<string, any>();
 
     for (const m of matches) {
-      matchById.set(m.id, m as any);
+      matchById.set(m.id, m);
 
-      const sc = getMatchScore(m as any);
+      const sc = getMatchScore(m);
       if (sc) matchScoreById.set(m.id, sc);
     }
 
     const matchIds = Array.from(matchScoreById.keys());
     if (matchIds.length === 0) {
-      return { ok: true, seasonId: opts.seasonId ?? null, picksProcessed: 0, note: 'No confirmed matches with score found' };
+      return {
+        ok: true,
+        seasonId: opts.seasonId ?? null,
+        picksProcessed: 0,
+        note: 'No confirmed matches with score found',
+      };
     }
 
     // 2) Picks en esos matches + liga (para saber su scoringRuleId)
@@ -413,14 +532,24 @@ export class ScoringService {
           // upsert league-rule score
           const psLeague = await tx.pickScore.upsert({
             where: { pickId_ruleId: { pickId: p.id, ruleId: leagueRuleId } },
-            create: { pickId: p.id, ruleId: leagueRuleId, points: bdLeague.total },
+            create: {
+              pickId: p.id,
+              ruleId: leagueRuleId,
+              points: bdLeague.total,
+            },
             update: { points: bdLeague.total },
           });
 
-          await tx.pickScoreDetail.deleteMany({ where: { pickScoreId: psLeague.id } });
+          await tx.pickScoreDetail.deleteMany({
+            where: { pickScoreId: psLeague.id },
+          });
           if (detailRowsLeague.length) {
             await tx.pickScoreDetail.createMany({
-              data: detailRowsLeague.map((d) => ({ pickScoreId: psLeague.id, code: d.code, points: d.points })),
+              data: detailRowsLeague.map((d) => ({
+                pickScoreId: psLeague.id,
+                code: d.code,
+                points: d.points,
+              })),
             });
           }
 
@@ -431,10 +560,16 @@ export class ScoringService {
             update: { points: bdGlobal.total },
           });
 
-          await tx.pickScoreDetail.deleteMany({ where: { pickScoreId: psGlobal.id } });
+          await tx.pickScoreDetail.deleteMany({
+            where: { pickScoreId: psGlobal.id },
+          });
           if (detailRowsGlobal.length) {
             await tx.pickScoreDetail.createMany({
-              data: detailRowsGlobal.map((d) => ({ pickScoreId: psGlobal.id, code: d.code, points: d.points })),
+              data: detailRowsGlobal.map((d) => ({
+                pickScoreId: psGlobal.id,
+                code: d.code,
+                points: d.points,
+              })),
             });
           }
 

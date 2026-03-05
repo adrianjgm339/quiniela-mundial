@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
@@ -9,19 +13,28 @@ import { JwtService } from '@nestjs/jwt';
 export class AuthService {
   private googleClient: OAuth2Client;
 
-  constructor(private prisma: PrismaService, private jwt: JwtService) {
+  constructor(
+    private prisma: PrismaService,
+    private jwt: JwtService,
+  ) {
     // Usa GOOGLE_CLIENT_ID en el backend (no NEXT_PUBLIC_)
     const clientId = process.env.GOOGLE_CLIENT_ID || '';
     this.googleClient = new OAuth2Client(clientId);
   }
 
-  async register(input: { email: string; password: string; displayName: string }) {
+  async register(input: {
+    email: string;
+    password: string;
+    displayName: string;
+  }) {
     const email = (input.email || '').trim().toLowerCase();
     const password = input.password || '';
     const displayName = (input.displayName || '').trim();
 
     if (!email || !password || !displayName) {
-      throw new BadRequestException('email, password, displayName are required');
+      throw new BadRequestException(
+        'email, password, displayName are required',
+      );
     }
 
     const exists = await this.prisma.user.findUnique({ where: { email } });
@@ -31,10 +44,20 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: { email, passwordHash, displayName },
-      select: { id: true, email: true, displayName: true, role: true, createdAt: true },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        role: true,
+        createdAt: true,
+      },
     });
 
-    const token = this.jwt.sign({ sub: user.id, email: user.email, role: user.role });
+    const token = this.jwt.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
     return { user, token };
   }
 
@@ -56,7 +79,11 @@ export class AuthService {
       createdAt: user.createdAt,
     };
 
-    const token = this.jwt.sign({ sub: user.id, email: user.email, role: user.role });
+    const token = this.jwt.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
     return { user: safeUser, token };
   }
 
@@ -76,13 +103,12 @@ export class AuthService {
     });
 
     const payload = ticket.getPayload();
-    if (!payload?.email) throw new UnauthorizedException('Invalid Google token');
+    if (!payload?.email)
+      throw new UnauthorizedException('Invalid Google token');
 
     const email = payload.email.trim().toLowerCase();
     const displayName =
-      (payload.name || '').trim() ||
-      email.split('@')[0] ||
-      'User';
+      (payload.name || '').trim() || email.split('@')[0] || 'User';
 
     // Buscar usuario por email
     let user = await this.prisma.user.findUnique({ where: { email } });
@@ -111,7 +137,11 @@ export class AuthService {
       createdAt: user.createdAt,
     };
 
-    const token = this.jwt.sign({ sub: user.id, email: user.email, role: user.role });
+    const token = this.jwt.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
     return { user: safeUser, token };
   }
 
@@ -119,9 +149,11 @@ export class AuthService {
     // Stub MVP anti-enumeration:
     // Siempre respondemos OK, exista o no exista el email.
     // Luego lo conectamos a email provider + token reset.
-    return { ok: true, message: 'Si existe una cuenta con ese email, recibirás instrucciones.' };
+    return {
+      ok: true,
+      message: 'Si existe una cuenta con ese email, recibirás instrucciones.',
+    };
   }
-
 
   async setActiveSeason(userId: string, seasonId: string) {
     const sid = (seasonId || '').trim();
@@ -186,23 +218,32 @@ export class AuthService {
       (slug || '')
         .trim()
         .replace(/-/g, ' ')
-        .replace(/\p{L}[\p{L}\p{M}'’\-]*/gu, (w) => w.charAt(0).toUpperCase() + w.slice(1));
+        .replace(
+          /\p{L}[\p{L}\p{M}'’\-]*/gu,
+          (w) => w.charAt(0).toUpperCase() + w.slice(1),
+        );
 
     const pickName = (
       translations: Array<{ locale: string; name: string }> | undefined,
       preferredLocale: string,
-      fallbackSlug: string
+      fallbackSlug: string,
     ) => {
       const list = Array.isArray(translations) ? translations : [];
       const p = (preferredLocale || '').trim();
 
-      const exact = list.find((t) => (t.locale || '').trim() === p)?.name?.trim();
+      const exact = list
+        .find((t) => (t.locale || '').trim() === p)
+        ?.name?.trim();
       if (exact) return exact;
 
-      const es = list.find((t) => (t.locale || '').trim() === 'es')?.name?.trim();
+      const es = list
+        .find((t) => (t.locale || '').trim() === 'es')
+        ?.name?.trim();
       if (es) return es;
 
-      const en = list.find((t) => (t.locale || '').trim() === 'en')?.name?.trim();
+      const en = list
+        .find((t) => (t.locale || '').trim() === 'en')
+        ?.name?.trim();
       if (en) return en;
 
       const any = list.find((t) => (t.name || '').trim())?.name?.trim();
@@ -216,30 +257,33 @@ export class AuthService {
       ...user,
       activeSeason: user.activeSeason
         ? {
-          id: user.activeSeason.id,
-          slug: user.activeSeason.slug,
-          name: pickName(user.activeSeason.translations, locale, user.activeSeason.slug),
-          competition: {
-            id: user.activeSeason.competition.id,
-            slug: user.activeSeason.competition.slug,
+            id: user.activeSeason.id,
+            slug: user.activeSeason.slug,
             name: pickName(
-              user.activeSeason.competition.translations,
+              user.activeSeason.translations,
               locale,
-              user.activeSeason.competition.slug
+              user.activeSeason.slug,
             ),
-            sport: {
-              id: user.activeSeason.competition.sport.id,
-              slug: user.activeSeason.competition.sport.slug,
+            competition: {
+              id: user.activeSeason.competition.id,
+              slug: user.activeSeason.competition.slug,
               name: pickName(
-                user.activeSeason.competition.sport.translations,
+                user.activeSeason.competition.translations,
                 locale,
-                user.activeSeason.competition.sport.slug
+                user.activeSeason.competition.slug,
               ),
+              sport: {
+                id: user.activeSeason.competition.sport.id,
+                slug: user.activeSeason.competition.sport.slug,
+                name: pickName(
+                  user.activeSeason.competition.sport.translations,
+                  locale,
+                  user.activeSeason.competition.sport.slug,
+                ),
+              },
             },
-          },
-        }
+          }
         : null,
     };
   }
-
 }

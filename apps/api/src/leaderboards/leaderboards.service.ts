@@ -1,11 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-type Row = { userId: string; points: number; rank: number; displayName?: string | null };
+type Row = {
+  userId: string;
+  points: number;
+  rank: number;
+  displayName?: string | null;
+};
 
 @Injectable()
 export class LeaderboardsService {
-  private async resolveSeasonDefaultRuleId(seasonId?: string | null): Promise<string> {
+  private async resolveSeasonDefaultRuleId(
+    seasonId?: string | null,
+  ): Promise<string> {
     // Fallback seguro si no hay evento seleccionado
     if (!seasonId) return 'B01';
 
@@ -18,10 +25,10 @@ export class LeaderboardsService {
     return s?.defaultScoringRuleId ?? 'B01';
   }
 
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) {}
 
   private async attachNames(rows: Row[]) {
-    const ids = Array.from(new Set(rows.map(r => r.userId)));
+    const ids = Array.from(new Set(rows.map((r) => r.userId)));
     if (!ids.length) return rows;
 
     const users = await this.prisma.user.findMany({
@@ -29,11 +36,15 @@ export class LeaderboardsService {
       select: { id: true, displayName: true },
     });
 
-    const map = new Map(users.map(u => [u.id, u.displayName]));
-    return rows.map(r => ({ ...r, displayName: map.get(r.userId) ?? null }));
+    const map = new Map(users.map((u) => [u.id, u.displayName]));
+    return rows.map((r) => ({ ...r, displayName: map.get(r.userId) ?? null }));
   }
 
-  async leagueLeaderboard(opts: { leagueId: string; viewerUserId: string; limit: number }) {
+  async leagueLeaderboard(opts: {
+    leagueId: string;
+    viewerUserId: string;
+    limit: number;
+  }) {
     const league = await this.prisma.league.findUnique({
       where: { id: opts.leagueId },
       select: { id: true, scoringRuleId: true, name: true, joinCode: true },
@@ -101,7 +112,11 @@ export class LeaderboardsService {
     };
   }
 
-  async worldLeaderboard(opts: { viewerUserId: string; limit: number; seasonId?: string }) {
+  async worldLeaderboard(opts: {
+    viewerUserId: string;
+    limit: number;
+    seasonId?: string;
+  }) {
     const ruleId = await this.resolveSeasonDefaultRuleId(opts.seasonId);
 
     const top = await this.prisma.$queryRaw<Row[]>`
@@ -167,7 +182,12 @@ export class LeaderboardsService {
     };
   }
 
-  async countryLeaderboard(opts: { countryCode: string; viewerUserId: string; limit: number; seasonId?: string }) {
+  async countryLeaderboard(opts: {
+    countryCode: string;
+    viewerUserId: string;
+    limit: number;
+    seasonId?: string;
+  }) {
     const ruleId = await this.resolveSeasonDefaultRuleId(opts.seasonId);
 
     const top = await this.prisma.$queryRaw<Row[]>`

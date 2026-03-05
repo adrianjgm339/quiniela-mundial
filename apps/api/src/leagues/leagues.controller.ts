@@ -1,11 +1,21 @@
-import { Body, Controller, Get, Post, Patch, Param, Req, UseGuards, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Req,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { LeaguesService } from './leagues.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('leagues')
 export class LeaguesController {
-  constructor(private leagues: LeaguesService) { }
+  constructor(private leagues: LeaguesService) {}
 
   @Get('mine')
   mine(@Req() req) {
@@ -15,7 +25,13 @@ export class LeaguesController {
   @Post()
   create(
     @Req() req,
-    @Body() body: { seasonId: string; name: string; scoringRuleId: string; joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL' },
+    @Body()
+    body: {
+      seasonId: string;
+      name: string;
+      scoringRuleId: string;
+      joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL';
+    },
   ) {
     return this.leagues.createLeague(req.user.userId, body);
   }
@@ -44,9 +60,18 @@ export class LeaguesController {
   updateAccess(
     @Req() req,
     @Param('leagueId') leagueId: string,
-    @Body() body: { joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL'; inviteEnabled?: boolean; rotateCode?: boolean },
+    @Body()
+    body: {
+      joinPolicy?: 'PUBLIC' | 'PRIVATE' | 'APPROVAL';
+      inviteEnabled?: boolean;
+      rotateCode?: boolean;
+    },
   ) {
-    return this.leagues.updateLeagueAccessSettings(req.user.userId, leagueId, body);
+    return this.leagues.updateLeagueAccessSettings(
+      req.user.userId,
+      leagueId,
+      body,
+    );
   }
 
   @Get(':leagueId/join-requests')
@@ -61,7 +86,12 @@ export class LeaguesController {
     @Param('requestId') requestId: string,
     @Body() body: { approve: boolean; reason?: string },
   ) {
-    return this.leagues.decideJoinRequest(req.user.userId, leagueId, requestId, body);
+    return this.leagues.decideJoinRequest(
+      req.user.userId,
+      leagueId,
+      requestId,
+      body,
+    );
   }
 
   @Patch(':leagueId/scoring-rule')
@@ -70,7 +100,11 @@ export class LeaguesController {
     @Param('leagueId') leagueId: string,
     @Body() body: { scoringRuleId: string | null },
   ) {
-    return this.leagues.setLeagueScoringRule(req.user.userId, leagueId, body.scoringRuleId ?? null);
+    return this.leagues.setLeagueScoringRule(
+      req.user.userId,
+      leagueId,
+      body.scoringRuleId ?? null,
+    );
   }
 
   @Patch(':leagueId/custom-rule')
@@ -103,7 +137,11 @@ export class LeaguesController {
     @Param('userId') targetUserId: string,
     @Body() body: { role: 'ADMIN' | 'MEMBER' },
   ) {
-    return this.leagues.setMemberRole(req.user.userId, leagueId, targetUserId, body.role);
+    return this.leagues.setMemberRole(
+      req.user.userId,
+      leagueId,
+      targetUserId,
+      body.role,
+    );
   }
-
 }

@@ -14,10 +14,12 @@ import { JwtAuthGuard } from './jwt.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) { }
+  constructor(private readonly auth: AuthService) {}
 
   @Post('register')
-  register(@Body() body: { email: string; password: string; displayName: string }) {
+  register(
+    @Body() body: { email: string; password: string; displayName: string },
+  ) {
     return this.auth.register(body);
   }
 
@@ -38,7 +40,6 @@ export class AuthController {
   forgotPassword(@Body() body: { email: string }) {
     return this.auth.forgotPassword(body);
   }
-
 
   @Get('me')
   @UseGuards(JwtAuthGuard)

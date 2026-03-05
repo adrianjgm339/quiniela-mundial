@@ -5,7 +5,7 @@ import { LeaderboardsService } from './leaderboards.service';
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class LeaderboardsController {
-  constructor(private readonly lbs: LeaderboardsService) { }
+  constructor(private readonly lbs: LeaderboardsService) {}
 
   // Ranking de una liga (regla de la liga)
   @Get('leagues/:leagueId/leaderboard')
