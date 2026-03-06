@@ -355,26 +355,30 @@ export default function MatchesPage() {
 
         const leaguesInSeason = leagues.filter((l) => (l as unknown as { seasonId?: string | null }).seasonId === seasonId);
 
-        const storedLeagueId = localStorage.getItem('activeLeagueId');
-
-        const storedLeagueOk =
-          !!storedLeagueId && leaguesInSeason.some((l) => l.id === storedLeagueId);
+        const keepRestoredLeague =
+          appliedLeaguesContextRef.current &&
+          leagueConfirmed &&
+          leagueId &&
+          leaguesInSeason.some((l) => l.id === leagueId);
 
         let nextLeagueId: string | null = null;
 
-        if (storedLeagueOk) {
-          nextLeagueId = storedLeagueId as string;
-        } else if (leaguesInSeason.length === 1) {
-          nextLeagueId = leaguesInSeason[0].id;
+        if (keepRestoredLeague) {
+          nextLeagueId = leagueId;
         } else {
-          nextLeagueId = null;
+          if (leaguesInSeason.length === 1) {
+            nextLeagueId = leaguesInSeason[0].id;
+          } else {
+            nextLeagueId = null;
+            localStorage.removeItem('activeLeagueId');
+          }
+
+          setLeagueId(nextLeagueId);
+          setLeagueConfirmed(!!nextLeagueId);
         }
 
-        setLeagueId(nextLeagueId);
-        setLeagueConfirmed(!!nextLeagueId);
-
         if (nextLeagueId) localStorage.setItem('activeLeagueId', nextLeagueId);
-        else localStorage.removeItem('activeLeagueId');
+        else if (!keepRestoredLeague) localStorage.removeItem('activeLeagueId');
 
         // Limpiar picks visibles mientras cambia liga/evento
         setPicksByMatchId({});
@@ -616,12 +620,11 @@ export default function MatchesPage() {
         koWinnerTeamId: finalKoWinnerTeamId,
 
         // Béisbol (totales del juego) — solo aplica si la regla da puntos
-        predTotalHits: showPredTotalHits ? th : undefined,
-        predTotalErrors: showPredTotalErrors ? te : undefined,
+        predTotalHits: showPredTotalHits ? th : null,
+        predTotalErrors: showPredTotalErrors ? te : null,
       });
 
       setPicksByMatchId((prev) => ({ ...prev, [pick.matchId]: pick }));
-      setPicksLeagueId(effectiveLeagueId);
       setOpen(false);
       setSelected(null);
     } catch (e: unknown) {
@@ -699,7 +702,7 @@ export default function MatchesPage() {
     return typeof v === 'number' && Number.isFinite(v) ? v : null;
   }
 
-  const scoringPoints = useMemo(() => {
+    const scoringPoints = useMemo(() => {
     // Default ultra-seguro: si no encontramos detalles, NO mostramos inputs.
     let hits = 0;
     let errors = 0;
@@ -1048,7 +1051,7 @@ export default function MatchesPage() {
                   {matches.map((m0) => {
                     const m = m0 as MatchWithExtras;
 
-                    const myPick = effectiveLeagueId ? picksByMatchId[m.id] : undefined;
+                    const myPick = effectiveLeagueId && picksLeagueId === effectiveLeagueId ? picksByMatchId[m.id] : undefined;
                     const locked = isLocked(m);
 
                     const kickoffLabel = formatLocalDateTime(locale, m.utcDateTime ?? m.timeUtc ?? null);

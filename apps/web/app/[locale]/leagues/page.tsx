@@ -119,8 +119,8 @@ function getErrorMessage(raw: unknown): string {
 
 function friendlyErrorMessage(raw: unknown) {
   const s = getErrorMessage(raw);
-  if (s.includes('League rules are locked') || s.includes('Tournament has started')) {
-    return 'No se puede cambiar la regla porque el torneo ya inició.';
+  if (s.includes('League rules are locked') || s.includes('Tournament has started') || s.includes('Tournament already started')) {
+    return 'El torneo ya inició: algunas configuraciones quedan bloqueadas.';
   }
 
   // errores típicos del backend

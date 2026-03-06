@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class LeaguesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async myLeagues(userId: string) {
     const rows = await this.prisma.leagueMember.findMany({
@@ -113,14 +113,11 @@ export class LeaguesService {
         inviteEnabled: true,
       },
     });
-    if (!league) throw new BadRequestException('Código inválido o expirado');
+    if (!league) throw new BadRequestException('El código ingresado no está asociado a ninguna liga o ya expiró');
 
     if (league.inviteEnabled === false) {
       throw new BadRequestException('Invitations are disabled for this league');
     }
-
-    // bloqueamos altas cuando torneo inició (misma lógica que reglas)
-    await this.assertTournamentNotStarted(league.seasonId);
 
     // Si la liga requiere aprobación: crear/actualizar solicitud en PENDING
     if (league.joinPolicy === 'APPROVAL') {
@@ -554,8 +551,6 @@ export class LeaguesService {
       select: { id: true, seasonId: true, joinPolicy: true },
     });
     if (!league) throw new NotFoundException('League not found');
-
-    await this.assertTournamentNotStarted(league.seasonId);
 
     if (league.joinPolicy !== 'PUBLIC') {
       throw new BadRequestException('League is not public');

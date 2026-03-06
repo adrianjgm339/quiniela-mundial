@@ -288,8 +288,21 @@ export async function joinLeagueByCode(token: string, input: { joinCode: string 
   });
 
   if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(msg || 'Failed to join league');
+    const ct = res.headers.get('content-type') || '';
+
+    // Si el backend devolvió JSON Nest-style { message, error, statusCode }
+    if (ct.includes('application/json')) {
+      const j = (await res.json()) as unknown;
+      if (j && typeof j === 'object' && 'message' in j) {
+        const m = (j as any).message;
+        if (typeof m === 'string' && m.trim()) throw new Error(m.trim());
+        if (Array.isArray(m) && m.length) throw new Error(String(m[0]));
+      }
+    }
+
+    // Fallback: texto plano
+    const msg = await res.text();
+    throw new Error((msg || '').trim() || 'Error al unirse a la liga');
   }
 
   return (await res.json()) as { ok: boolean; leagueId: string };
