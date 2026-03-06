@@ -215,8 +215,19 @@ export async function upsertPick(
     body: JSON.stringify(input),
   });
   if (!res.ok) {
+    const ct = res.headers.get('content-type') || '';
+
+    if (ct.includes('application/json')) {
+      const j = (await res.json()) as unknown;
+      if (j && typeof j === 'object' && 'message' in j) {
+        const m = (j as any).message;
+        if (typeof m === 'string' && m.trim()) throw new Error(m.trim());
+        if (Array.isArray(m) && m.length) throw new Error(String(m[0]));
+      }
+    }
+
     const txt = await res.text().catch(() => '');
-    throw new Error(txt || 'Failed to save pick');
+    throw new Error((txt || '').trim() || 'Failed to save pick');
   }
   return res.json();
 }

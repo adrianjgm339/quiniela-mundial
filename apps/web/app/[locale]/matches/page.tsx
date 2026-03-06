@@ -107,6 +107,7 @@ function formatCountdown(ms: number) {
 export default function MatchesPage() {
   const router = useRouter();
   const appliedLeaguesContextRef = useRef(false);
+  const lastLoadedSeasonIdRef = useRef<string>('');
   const { locale } = useParams<{ locale: string }>();
   const [now, setNow] = useState(() => Date.now());
 
@@ -314,9 +315,23 @@ export default function MatchesPage() {
             setSeasonId('');
           }
 
-          localStorage.removeItem('activeLeagueId');
-          setLeagueId(null);
-          setLeagueConfirmed(false);
+          const storedLeagueId = localStorage.getItem('activeLeagueId') || '';
+
+          const leagueOk =
+            !!storedLeagueId &&
+            myLeagues.some(
+              (l) => l.id === storedLeagueId && (l as unknown as { seasonId?: string | null }).seasonId === activeSeasonId,
+            );
+
+          if (leagueOk) {
+            setLeagueId(storedLeagueId);
+            setLeagueConfirmed(true);
+          } else {
+            setLeagueId(null);
+            setLeagueConfirmed(false);
+            // si no es válida para este evento, sí la limpiamos
+            if (storedLeagueId) localStorage.removeItem('activeLeagueId');
+          }
         }
 
         // Importante: no pedimos partidos aquí; los pedimos cuando haya seasonId.
@@ -341,6 +356,11 @@ export default function MatchesPage() {
       return;
     }
 
+    // IMPORTANT: este efecto solo debe correr cuando CAMBIA el evento (seasonId),
+    // no cuando el usuario selecciona una liga (eso se maneja en otro effect).
+    if (lastLoadedSeasonIdRef.current === seasonId) return;
+    lastLoadedSeasonIdRef.current = seasonId;
+
     void (async () => {
       try {
         setLoading(true);
@@ -352,33 +372,32 @@ export default function MatchesPage() {
         router.replace(`/${locale}/matches`);
 
         await setActiveSeason(token, seasonId);
+        const leaguesInSeason = leagues.filter(
+          (l) => (l as unknown as { seasonId?: string | null }).seasonId === seasonId,
+        );
 
-        const leaguesInSeason = leagues.filter((l) => (l as unknown as { seasonId?: string | null }).seasonId === seasonId);
-
-        const keepRestoredLeague =
-          appliedLeaguesContextRef.current &&
-          leagueConfirmed &&
-          leagueId &&
-          leaguesInSeason.some((l) => l.id === leagueId);
+        // Si ya hay una liga seleccionada y pertenece al evento, NO la pisamos
+        const currentLeagueOk =
+          !!leagueId && leaguesInSeason.some((l) => l.id === leagueId);
 
         let nextLeagueId: string | null = null;
 
-        if (keepRestoredLeague) {
-          nextLeagueId = leagueId;
+        if (currentLeagueOk) {
+          nextLeagueId = leagueId!;
+        } else if (leaguesInSeason.length === 1) {
+          // Si solo hay 1 liga en el evento, autoseleccionamos
+          nextLeagueId = leaguesInSeason[0].id;
         } else {
-          if (leaguesInSeason.length === 1) {
-            nextLeagueId = leaguesInSeason[0].id;
-          } else {
-            nextLeagueId = null;
-            localStorage.removeItem('activeLeagueId');
-          }
-
-          setLeagueId(nextLeagueId);
-          setLeagueConfirmed(!!nextLeagueId);
+          // Si hay varias, dejamos que el usuario seleccione
+          nextLeagueId = null;
         }
 
+        // Aplicar estado + persistencia
+        setLeagueId(nextLeagueId);
+        setLeagueConfirmed(!!nextLeagueId);
+
         if (nextLeagueId) localStorage.setItem('activeLeagueId', nextLeagueId);
-        else if (!keepRestoredLeague) localStorage.removeItem('activeLeagueId');
+        else localStorage.removeItem('activeLeagueId');
 
         // Limpiar picks visibles mientras cambia liga/evento
         setPicksByMatchId({});
@@ -399,7 +418,7 @@ export default function MatchesPage() {
         setLoading(false);
       }
     })();
-  }, [token, seasonId, locale, router, leagues, leagueConfirmed, leagueId]);
+  }, [token, seasonId, locale, router, leagues]);
 
   // Cargar picks cuando cambia la liga efectiva
   useEffect(() => {
@@ -407,6 +426,12 @@ export default function MatchesPage() {
 
     if (!effectiveLeagueId) {
       setPicksByMatchId({});
+      setLoadingPicks(false);
+      return;
+    }
+
+    // Si ya cargamos picks para esta liga, no recargamos
+    if (picksLeagueId === effectiveLeagueId) {
       setLoadingPicks(false);
       return;
     }
@@ -442,7 +467,7 @@ export default function MatchesPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, effectiveLeagueId]);
+  }, [token, effectiveLeagueId, picksLeagueId]);
 
   // Refetch cuando cambian filtros phase/group
   useEffect(() => {
@@ -569,14 +594,23 @@ export default function MatchesPage() {
     const th = thRaw === '' ? null : Number(thRaw);
     const te = teRaw === '' ? null : Number(teRaw);
 
+    if (showPredTotalHits && thRaw === '') {
+      setSaveError('Debes indicar el Total Hits (es obligatorio para esta liga).');
+      return;
+    }
+    if (showPredTotalErrors && teRaw === '') {
+      setSaveError('Debes indicar el Total Errores (es obligatorio para esta liga).');
+      return;
+    }
+
     const invalidInt = (n: number | null) => n !== null && (!Number.isFinite(n) || !Number.isInteger(n) || n < 0);
 
     if (showPredTotalHits && invalidInt(th)) {
-      setSaveError('Total Hits debe ser un entero >= 0 (o dejarse vacío).');
+      setSaveError('Total Hits debe ser un entero >= 0.');
       return;
     }
     if (showPredTotalErrors && invalidInt(te)) {
-      setSaveError('Total Errores debe ser un entero >= 0 (o dejarse vacío).');
+      setSaveError('Total Errores debe ser un entero >= 0.');
       return;
     }
 
@@ -620,8 +654,8 @@ export default function MatchesPage() {
         koWinnerTeamId: finalKoWinnerTeamId,
 
         // Béisbol (totales del juego) — solo aplica si la regla da puntos
-        predTotalHits: showPredTotalHits ? th : null,
-        predTotalErrors: showPredTotalErrors ? te : null,
+        predTotalHits: showPredTotalHits ? th ?? undefined : undefined,
+        predTotalErrors: showPredTotalErrors ? te ?? undefined : undefined,
       });
 
       setPicksByMatchId((prev) => ({ ...prev, [pick.matchId]: pick }));
@@ -702,7 +736,7 @@ export default function MatchesPage() {
     return typeof v === 'number' && Number.isFinite(v) ? v : null;
   }
 
-    const scoringPoints = useMemo(() => {
+  const scoringPoints = useMemo(() => {
     // Default ultra-seguro: si no encontramos detalles, NO mostramos inputs.
     let hits = 0;
     let errors = 0;
@@ -935,7 +969,7 @@ export default function MatchesPage() {
                 Liga
                 <select
                   className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] disabled:opacity-50 disabled:bg-[var(--background)] disabled:text-[color:var(--muted)]"
-                  value={effectiveLeagueId ?? ''}
+                  value={leagueId ?? ''}
                   onChange={(e) => {
                     const v = e.target.value;
                     if (!v) {
