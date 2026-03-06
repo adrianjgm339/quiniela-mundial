@@ -530,12 +530,14 @@ export default function DashboardPage() {
                   {progress.confirmed}/{progress.total} confirmados
                 </div>
 
-                <div className="mt-3 h-2 rounded-full bg-[color:var(--border)] overflow-hidden">
+                <div className="mt-3 h-2 rounded-full bg-[color:color-mix(in_srgb,var(--border)_55%,transparent)] overflow-hidden">
                   <div
                     className="h-full"
                     style={{
                       width: `${progress.pct}%`,
-                      background: "color-mix(in srgb, var(--primary) 70%, transparent)",
+                      minWidth: progress.pct > 0 ? "8px" : undefined,
+                      background: "var(--accent)",
+                      boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)",
                     }}
                   />
                 </div>
