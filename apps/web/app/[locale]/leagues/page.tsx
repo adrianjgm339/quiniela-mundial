@@ -252,14 +252,19 @@ export default function LeaguesPage() {
 
   const [joining, setJoining] = useState(false);
 
-  const [entryMode, setEntryMode] = useState<'CODE' | 'PUBLIC' | 'CREATE'>(() => {
-    const v = localStorage.getItem('leagues_entry_mode');
-    if (v === 'PUBLIC') return 'PUBLIC';
-    if (v === 'CREATE') return 'CREATE';
-    return 'CODE';
-  });
+  const [entryMode, setEntryMode] = useState<'CODE' | 'PUBLIC' | 'CREATE'>('CODE');
 
   useEffect(() => {
+    // solo cliente
+    const v = typeof window !== 'undefined' ? localStorage.getItem('leagues_entry_mode') : null;
+    if (v === 'PUBLIC' || v === 'CREATE' || v === 'CODE') {
+      setEntryMode(v);
+    }
+  }, []);
+
+  useEffect(() => {
+    // solo cliente
+    if (typeof window === 'undefined') return;
     localStorage.setItem('leagues_entry_mode', entryMode);
   }, [entryMode]);
 
@@ -1232,7 +1237,7 @@ export default function LeaguesPage() {
                                 <Badge>{joinPolicyLabel(l.joinPolicy)}</Badge>
                               </div>
                               <div className="text-sm text-[color:var(--muted)]">
-                                Miembros: <span className="text-zinc-200">{l.memberCount}</span>
+                                <span className="text-[color:var(--foreground)] font-medium">{l.memberCount}</span>
                               </div>
                             </div>
 
