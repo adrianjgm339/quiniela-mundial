@@ -251,8 +251,8 @@ export default function AdminRulesPage() {
   }, [getTokenOrRedirect, selectedId]);
 
   useEffect(() => {
-  void loadSelectedRule();
-}, [loadSelectedRule]);
+    void loadSelectedRule();
+  }, [loadSelectedRule]);
 
   function setDetail(code: string, points: number) {
     setEditing((prev) => {
@@ -311,7 +311,11 @@ export default function AdminRulesPage() {
     setError(null);
 
     try {
-      const res = await recomputeScoring(token, seasonId || undefined);
+      if (!seasonId) {
+        setMsg('Selecciona un evento antes de recalcular.');
+        return;
+      }
+      const res = await recomputeScoring(token, seasonId);
       setMsg(
         `✅ Recalculo listo. Matches confirmados: ${res.confirmedMatchesWithScore} · Picks procesados: ${res.picksProcessed}`,
       );
