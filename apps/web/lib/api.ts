@@ -523,24 +523,34 @@ export async function setScoringRuleDetails(
   return (await res.json()) as ApiScoringRule;
 }
 
-export async function recomputeScoring(token: string, seasonId?: string) {
-  const params = new URLSearchParams();
-  if (seasonId) params.set("seasonId", seasonId);
+export async function recomputeScoring(
+  token: string,
+  seasonId: string,
+  cursor?: string | null,
+  limit?: number,
+) {
+  const qs = new URLSearchParams();
+  qs.set('seasonId', seasonId);
 
-  const url = params.toString() ? `${API_BASE}/scoring/recompute?${params.toString()}` : `${API_BASE}/scoring/recompute`;
+  if (cursor) qs.set('cursor', cursor);
+  if (typeof limit === 'number' && Number.isFinite(limit)) qs.set('limit', String(limit));
 
-  const res = await fetch(url, {
-    method: "POST",
+  const res = await fetch(`${API_BASE}/scoring/recompute?${qs.toString()}`, {
+    method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
 
-  if (!res.ok) throw new Error(await res.text().catch(() => "Failed"));
+  if (!res.ok) throw new Error(await res.text().catch(() => 'Failed'));
+
   return res.json() as Promise<{
     ok: boolean;
     seasonId: string | null;
     confirmedMatchesWithScore: number;
     picksProcessed: number;
-    rulesLoaded: string[];
+    totalPicks?: number;
+    nextCursor?: string | null;
+    done?: boolean;
+    rulesLoaded?: string[];
     note?: string;
   }>;
 }

@@ -100,13 +100,27 @@ export class ScoringController {
   async recompute(
     @Req() req: any,
     @Query('seasonId') seasonIdQ?: string,
-    @Body() body?: { seasonId?: string },
+    @Body()
+    body?: {
+      seasonId?: string;
+      cursor?: string;
+      limit?: number | string;
+    },
+    @Query('cursor') cursorQ?: string,
+    @Query('limit') limitQ?: string,
   ) {
     this.assertAdmin(req);
 
     const seasonId = (seasonIdQ || body?.seasonId || '').trim();
     if (!seasonId) throw new BadRequestException('seasonId requerido');
 
-    return this.scoring.recompute({ seasonId });
+    const cursor = (cursorQ || body?.cursor || '').trim() || undefined;
+    const limitRaw = (limitQ || (body as any)?.limit || '').toString().trim();
+    const limit = limitRaw ? Math.max(1, Math.min(1000, Number(limitRaw))) : 300;
+    if (!Number.isFinite(limit) || !Number.isInteger(limit)) {
+      throw new BadRequestException('limit inválido');
+    }
+
+    return this.scoring.recompute({ seasonId, cursor, limit });
   }
 }

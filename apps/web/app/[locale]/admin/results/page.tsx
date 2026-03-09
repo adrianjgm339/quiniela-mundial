@@ -527,14 +527,22 @@ export default function AdminResultsPage() {
     return res.json();
   }
 
-  async function recomputeScoring(token: string, seasonId: string) {
+  async function recomputeScoring(
+    token: string,
+    seasonId: string,
+    cursor?: string | null,
+    limit: number = 300,
+  ) {
     const qs = new URLSearchParams();
     qs.set('seasonId', seasonId);
+    qs.set('limit', String(limit));
+    if (cursor) qs.set('cursor', cursor);
 
     const res = await fetch(`${API_URL}/scoring/recompute?${qs.toString()}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
+
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   }
@@ -796,11 +804,34 @@ export default function AdminResultsPage() {
       setRecomputeMsg(null);
       setRecomputing(true);
 
-      const r = await recomputeScoring(token, activeSeasonId);
+      const limit = 300;
+      let cursor: string | null = null;
+      let totalProcessed = 0;
+      let safety = 0;
 
-      setRecomputeMsg(
-        `✅ Scoring recalculado: ${r.confirmedMatchesWithScore} partidos confirmados · ${r.picksProcessed} picks procesados.`,
-      );
+      while (true) {
+        safety++;
+        if (safety > 10000) throw new Error('Safety stop: demasiadas iteraciones');
+
+        const r = await recomputeScoring(token, activeSeasonId, cursor, limit);
+
+        totalProcessed += Number(r.picksProcessed ?? 0);
+        cursor = (r.nextCursor ?? null) as string | null;
+
+        const total = Number(r.totalPicks ?? 0);
+        const pct = total > 0 ? Math.min(100, Math.round((totalProcessed / total) * 100)) : 0;
+
+        setRecomputeMsg(
+          `⏳ Recalculando… ${totalProcessed}/${total} picks (${pct}%) · confirmados: ${r.confirmedMatchesWithScore ?? '—'}`,
+        );
+
+        if (r.done) {
+          setRecomputeMsg(
+            `✅ Scoring recalculado: ${r.confirmedMatchesWithScore} partidos confirmados · ${totalProcessed} picks procesados.`,
+          );
+          break;
+        }
+      }
 
       // opcional: refrescar lista por si cambió algo
       await fetchMatches(token, activeSeasonId || undefined);
