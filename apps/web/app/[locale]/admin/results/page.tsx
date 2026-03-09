@@ -819,15 +819,19 @@ export default function AdminResultsPage() {
         cursor = (r.nextCursor ?? null) as string | null;
 
         const total = Number(r.totalPicks ?? 0);
-        const pct = total > 0 ? Math.min(100, Math.round((totalProcessed / total) * 100)) : 0;
+        const pct =
+          total > 0 && Number.isFinite(total)
+            ? Math.min(100, Math.round((totalProcessed / total) * 100))
+            : null;
 
         setRecomputeMsg(
-          `⏳ Recalculando… ${totalProcessed}/${total} picks (${pct}%) · confirmados: ${r.confirmedMatchesWithScore ?? '—'}`,
+          `⏳ Recalculando… ${totalProcessed}/${total || '—'} picks${pct === null ? '' : ` (${pct}%)`} · confirmados: ${r.confirmedMatchesWithScore ?? '—'
+          }`,
         );
 
         if (r.done) {
           setRecomputeMsg(
-            `✅ Scoring recalculado: ${r.confirmedMatchesWithScore} partidos confirmados · ${totalProcessed} picks procesados.`,
+            `✅ Scoring recalculado: ${r.confirmedMatchesWithScore} partidos confirmados · ${totalProcessed}/${total || '—'} picks procesados.`,
           );
           break;
         }
