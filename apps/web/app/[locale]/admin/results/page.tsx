@@ -531,7 +531,7 @@ export default function AdminResultsPage() {
     token: string,
     seasonId: string,
     cursor?: string | null,
-    limit: number = 300,
+    limit: number = 50,
   ) {
     const qs = new URLSearchParams();
     qs.set('seasonId', seasonId);
@@ -804,7 +804,7 @@ export default function AdminResultsPage() {
       setRecomputeMsg(null);
       setRecomputing(true);
 
-      const limit = 300;
+      const limit = 50;
       let cursor: string | null = null;
       let totalProcessed = 0;
       let safety = 0;
