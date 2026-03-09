@@ -306,6 +306,22 @@ export default function LeaguesPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  // "Cómo sumo puntos" (Mis ligas)
+  const [pointsLeagueIdOpen, setPointsLeagueIdOpen] = useState<string | null>(null);
+  const [ruleCache, setRuleCache] = useState<Record<string, ApiScoringRule>>({});
+
+  const ensureRuleLoaded = useCallback(
+    async (ruleId: string) => {
+      if (!token) return;
+      if (!ruleId) return;
+      if (ruleCache[ruleId]) return;
+
+      const r = await getScoringRule(token, ruleId);
+      setRuleCache((prev) => ({ ...prev, [ruleId]: r }));
+    },
+    [token, ruleCache],
+  );
+
   const currentActiveSeasonId = useMemo(() => {
     const m = meInfo;
     return m?.activeSeason?.id ?? m?.activeSeasonId ?? null;
@@ -731,6 +747,16 @@ export default function LeaguesPage() {
   async function onJoin() {
     if (!token) return;
     const code = joinCode.trim().toUpperCase();
+
+    // UX: si ya estás en esa liga, evita pegarle al backend y muestra mensaje claro
+    const already = leagues.find((l) => ((l as LeagueLike).joinCode ?? '').toUpperCase() === code) as LeagueLike | undefined;
+    if (already) {
+      setError(null);
+      setInfo(`Ya eres miembro de la liga "${already.name}".`);
+      setJoinCode('');
+      return;
+    }
+
     if (!code) {
       setError('Escribe un código para unirte.');
       return;
@@ -1544,28 +1570,95 @@ export default function LeaguesPage() {
               {leaguesByEvent.map((l) => {
                 const league = l as LeagueLike;
                 return (
-                  <div key={league.id} className="p-4 flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-medium flex items-center gap-2">
-                        <span>{league.name}</span>
-                        <Badge>{joinPolicyLabel(league.joinPolicy ?? undefined)}</Badge>
+                  <div key={league.id} className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-medium flex items-center gap-2">
+                          <span>{league.name}</span>
+                          <Badge>{joinPolicyLabel(league.joinPolicy ?? undefined)}</Badge>
+                        </div>
+                        <div className="text-sm text-[color:var(--muted)]">
+                          Código:{' '}
+                          <span className="text-[color:var(--foreground)] font-medium">{league.joinCode}</span>
+                          {' · '}
+                          Regla:{' '}
+                          <span className="text-[color:var(--foreground)] font-medium">{league.scoringRuleId ?? '—'}</span>
+                        </div>
                       </div>
-                      <div className="text-sm text-[color:var(--muted)]">
-                        Código: <span className="text-[color:var(--foreground)] font-medium">{league.joinCode}</span>
-                        {' · '}
-                        Regla: <span className="text-[color:var(--foreground)] font-medium">{league.scoringRuleId ?? '—'}</span>
-                      </div>
-                    </div>
 
-                    <div className="flex gap-2">
-                      {(league.myRole === 'OWNER' || league.myRole === 'ADMIN') && (
-                        <Button variant="secondary" onClick={() => router.push(`/${locale}/leagues/${league.id}/settings`)}>
-                          Configurar
+                      <div className="flex gap-2 items-center">
+                        {(league.myRole === 'OWNER' || league.myRole === 'ADMIN') && (
+                          <Button
+                            variant="secondary"
+                            onClick={() => router.push(`/${locale}/leagues/${league.id}/settings`)}
+                          >
+                            Configurar
+                          </Button>
+                        )}
+
+                        <Button
+                          variant="secondary"
+                          onClick={async () => {
+                            const next = pointsLeagueIdOpen === league.id ? null : league.id;
+                            setPointsLeagueIdOpen(next);
+
+                            if (next && league.scoringRuleId) {
+                              try {
+                                await ensureRuleLoaded(league.scoringRuleId);
+                              } catch (e: unknown) {
+                                setError(friendlyErrorMessage(e));
+                              }
+                            }
+                          }}
+                        >
+                          ¿Cómo sumo puntos en esta liga?
                         </Button>
-                      )}
 
-                      <Button onClick={() => selectLeagueAndGoMatches(league)}>Entrar</Button>
+                        <Button onClick={() => selectLeagueAndGoMatches(league)}>Entrar</Button>
+                      </div>
                     </div>
+
+                    {pointsLeagueIdOpen === league.id && (
+                      <div className="mt-4">
+                        <Card className="p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold">Conceptos para sumar puntos</div>
+                              <div className="text-xs text-[color:var(--muted)] mt-1">
+                                {league.scoringRuleId ? ruleCache[league.scoringRuleId]?.name ?? 'Cargando…' : '—'}
+                              </div>
+                            </div>
+
+                            <Button size="sm" variant="secondary" onClick={() => setPointsLeagueIdOpen(null)}>
+                              Cerrar
+                            </Button>
+                          </div>
+
+                          <div className="mt-3">
+                            <div className="flex items-center justify-between text-xs text-[color:var(--muted)] mb-2">
+                              <span> </span>
+                              <span className="w-16 text-right">Pts</span>
+                            </div>
+
+                            <div className="space-y-2">
+                              {concepts.map((c) => {
+                                const ruleId = league.scoringRuleId ?? '';
+                                const rule = ruleId ? ruleCache[ruleId] : undefined;
+                                const pts =
+                                  rule?.details?.find((d: ApiScoringRuleDetail) => d.code === c.code)?.points ?? 0;
+
+                                return (
+                                  <div key={c.code} className="flex items-center justify-between">
+                                    <div className="text-sm text-[var(--foreground)]">{c.label}</div>
+                                    <div className="text-sm font-semibold w-16 text-right">{pts}</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </Card>
+                      </div>
+                    )}
                   </div>
                 );
               })}
