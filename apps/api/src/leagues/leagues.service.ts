@@ -119,6 +119,15 @@ export class LeaguesService {
       throw new BadRequestException('Invitations are disabled for this league');
     }
 
+    const alreadyMember = await this.prisma.leagueMember.findUnique({
+      where: { leagueId_userId: { leagueId: league.id, userId } },
+      select: { status: true },
+    });
+
+    if (alreadyMember && alreadyMember.status === 'ACTIVE') {
+      throw new BadRequestException('Ya eres miembro de esta liga.');
+    }
+
     // Si la liga requiere aprobación: crear/actualizar solicitud en PENDING
     if (league.joinPolicy === 'APPROVAL') {
       const req = await this.prisma.leagueJoinRequest.upsert({
@@ -141,7 +150,10 @@ export class LeaguesService {
       };
     }
 
-    // PRIVATE/PUBLIC por código => entra directo
+    if (alreadyMember && alreadyMember.status === 'ACTIVE') {
+      throw new BadRequestException('Ya eres miembro de esta liga.');
+    }
+
     await this.prisma.leagueMember.upsert({
       where: { leagueId_userId: { leagueId: league.id, userId } },
       update: { status: 'ACTIVE' },
@@ -163,6 +175,23 @@ export class LeaguesService {
     // por ahora: guardamos en user un campo activo
     // si aún no existe activeLeagueId en schema, lo agregamos luego (pero por ahora seguimos con localStorage)
     return { ok: true };
+  }
+
+  async updateLeagueName(userId: string, leagueId: string, nameRaw: string) {
+    const name = (nameRaw || '').trim();
+    if (!name) throw new BadRequestException('name is required');
+
+    // Permisos: OWNER/ADMIN de la liga (o ADMIN global, porque assertCanManageLeague lo permite)
+    await this.assertCanManageLeague(userId, leagueId);
+
+    // Importante: SOLO nombre. NO bloqueamos por "tournament started".
+    const updated = await this.prisma.league.update({
+      where: { id: leagueId },
+      data: { name },
+      select: { id: true, name: true },
+    });
+
+    return updated;
   }
 
   private async assertCanManageLeague(userId: string, leagueId: string) {

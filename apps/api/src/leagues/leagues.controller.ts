@@ -15,7 +15,7 @@ import { LeaguesService } from './leagues.service';
 @UseGuards(JwtAuthGuard)
 @Controller('leagues')
 export class LeaguesController {
-  constructor(private leagues: LeaguesService) {}
+  constructor(private leagues: LeaguesService) { }
 
   @Get('mine')
   mine(@Req() req) {
@@ -105,6 +105,15 @@ export class LeaguesController {
       leagueId,
       body.scoringRuleId ?? null,
     );
+  }
+
+  @Patch(':leagueId/name')
+  updateName(
+    @Req() req,
+    @Param('leagueId') leagueId: string,
+    @Body() body: { name: string },
+  ) {
+    return this.leagues.updateLeagueName(req.user.userId, leagueId, body.name);
   }
 
   @Patch(':leagueId/custom-rule')

@@ -73,6 +73,9 @@ export default function LeagueSettingsPage() {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [leagueName, setLeagueName] = useState<string | null>(null);
 
+  const [leagueNameDraft, setLeagueNameDraft] = useState<string>('');
+  const [savingName, setSavingName] = useState(false);
+
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
@@ -186,6 +189,45 @@ export default function LeagueSettingsPage() {
     setAccessSaving(false);
   }
 
+  async function saveLeagueName(t: string) {
+    const name = leagueNameDraft.trim();
+    if (!name) {
+      setError('El nombre no puede estar vacío.');
+      return;
+    }
+
+    setSavingName(true);
+    setError(null);
+    setInfo(null);
+
+    const res = await fetch(`${API_BASE}/leagues/${leagueId}/name`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${t}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      setError(friendlyErrorMessage(text));
+      setSavingName(false);
+      return;
+    }
+
+    const updated: unknown = await res.json();
+    const updatedName = getString(updated, 'name') ?? name;
+
+    setLeagueName(updatedName);
+    setLeagueNameDraft(updatedName);
+
+    setInfo('Nombre actualizado.');
+    setTimeout(() => setInfo(null), 3000);
+
+    setSavingName(false);
+  }
+
   async function rotateCode(t: string) {
     setAccessSaving(true);
     setError(null);
@@ -231,7 +273,9 @@ export default function LeagueSettingsPage() {
         const rows: unknown = await res.json().catch(() => []);
         const arr = Array.isArray(rows) ? rows : [];
         const found = arr.find((x: unknown) => getString(x, 'id') === leagueId);
-        setLeagueName(isRecord(found) && typeof found.name === 'string' ? found.name : null);
+        const nextName = isRecord(found) && typeof found.name === 'string' ? found.name : null;
+        setLeagueName(nextName);
+        setLeagueNameDraft(nextName ?? '');
       } catch {
         setLeagueName(null);
       }
@@ -370,6 +414,30 @@ export default function LeagueSettingsPage() {
             <span className="font-medium text-[var(--foreground)]">
               {leagueName ? leagueName : leagueId}
             </span>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              value={leagueNameDraft}
+              onChange={(e) => setLeagueNameDraft(e.target.value)}
+              placeholder="Nombre de la liga"
+              className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)]"
+              disabled={!canManageRoles || !token || savingName}
+            />
+
+            <button
+              disabled={!canManageRoles || !token || savingName || leagueNameDraft.trim() === (leagueName ?? '').trim()}
+              onClick={() => token && saveLeagueName(token)}
+              className="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[color:var(--muted)] font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--card)]"
+            >
+              {savingName ? 'Guardando…' : 'Guardar nombre'}
+            </button>
+
+            {!canManageRoles && (
+              <div className="text-xs text-amber-200">
+                Solo OWNER/ADMIN puede renombrar la liga.
+              </div>
+            )}
           </div>
         </div>
 
