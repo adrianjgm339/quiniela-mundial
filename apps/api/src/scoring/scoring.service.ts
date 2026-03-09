@@ -442,7 +442,18 @@ export class ScoringService {
   }
 
   async recompute(opts: { seasonId?: string; cursor?: string; limit?: number }) {
-    const B01 = 'B01';
+    const FALLBACK_GLOBAL_RULE_ID = 'B01';
+
+    let globalRuleId = FALLBACK_GLOBAL_RULE_ID;
+
+    if (opts.seasonId) {
+      const season = await this.prisma.season.findUnique({
+        where: { id: opts.seasonId },
+        select: { defaultScoringRuleId: true },
+      });
+
+      globalRuleId = season?.defaultScoringRuleId || FALLBACK_GLOBAL_RULE_ID;
+    }
 
     // 1) Matches confirmados (trae todos los campos para no depender del nombre de score)
     const matches = await this.prisma.match.findMany({
@@ -505,8 +516,8 @@ export class ScoringService {
       };
     }
 
-    // 3) Conjunto de ruleIds a cargar (liga + B01)
-    const ruleIds = new Set<string>([B01]);
+    // 3) Conjunto de ruleIds a cargar (liga + regla global del evento)
+    const ruleIds = new Set<string>([globalRuleId]);
     for (const p of picks) {
       const rid = p.league?.scoringRuleId;
       if (rid) ruleIds.add(rid);
@@ -524,7 +535,7 @@ export class ScoringService {
       ruleMapById.get(d.ruleId)![d.code] = d.points;
     }
 
-    // 5) Upsert PickScore para (regla liga) y B01
+    // 5) Upsert PickScore para (regla liga) y regla global del evento
     let processed = 0;
 
     // NOTE: No usamos interactive transactions aquí (Neon pooler + Vercel -> P2028)
@@ -532,9 +543,9 @@ export class ScoringService {
       const score = matchScoreById.get(p.matchId);
       if (!score) continue;
 
-      const leagueRuleId = p.league?.scoringRuleId || B01;
+      const leagueRuleId = p.league?.scoringRuleId || globalRuleId;
       const leagueRule = ruleMapById.get(leagueRuleId) ?? {};
-      const globalRule = ruleMapById.get(B01) ?? {};
+      const globalRule = ruleMapById.get(globalRuleId) ?? {};
 
       const match = matchById.get(p.matchId);
 
@@ -563,8 +574,8 @@ export class ScoringService {
       }
 
       const psGlobal = await this.prisma.pickScore.upsert({
-        where: { pickId_ruleId: { pickId: p.id, ruleId: B01 } },
-        create: { pickId: p.id, ruleId: B01, points: bdGlobal.total },
+        where: { pickId_ruleId: { pickId: p.id, ruleId: globalRuleId } },
+        create: { pickId: p.id, ruleId: globalRuleId, points: bdGlobal.total },
         update: { points: bdGlobal.total },
       });
 
