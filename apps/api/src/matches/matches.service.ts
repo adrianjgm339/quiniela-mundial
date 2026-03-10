@@ -35,7 +35,7 @@ function isAnyResultFieldPresent(dto: UpdateMatchResultDto) {
 
 @Injectable()
 export class MatchesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async list(args: ListArgs) {
     const { userId, locale, phaseCode, groupCode } = args;
@@ -179,7 +179,18 @@ export class MatchesService {
 
         score:
           m.homeScore != null && m.awayScore != null
-            ? { home: m.homeScore, away: m.awayScore }
+            ? {
+              home: m.homeScore,
+              away: m.awayScore,
+              totalHits:
+                (m.homeHits ?? null) != null || (m.awayHits ?? null) != null
+                  ? (m.homeHits ?? 0) + (m.awayHits ?? 0)
+                  : null,
+              totalErrors:
+                (m.homeErrors ?? null) != null || (m.awayErrors ?? null) != null
+                  ? (m.homeErrors ?? 0) + (m.awayErrors ?? 0)
+                  : null,
+            }
             : null,
 
         // Béisbol: stats oficiales (si existen)

@@ -152,7 +152,12 @@ export type ApiMatch = {
   closeUtc: string | null;
   venue?: string | null;
   status: string;
-  score: null | { home: number; away: number };
+  score: null | {
+    home: number;
+    away: number;
+    totalHits?: number | null;
+    totalErrors?: number | null;
+  };
   homeTeam: { id: string; externalId: string; name: string; flagKey?: string | null; isPlaceholder: boolean };
   awayTeam: { id: string; externalId: string; name: string; flagKey?: string | null; isPlaceholder: boolean };
   phaseCode: string; // "F01" grupos, "F02".. KO
@@ -190,6 +195,50 @@ export async function listPicks(token: string, leagueId: string) {
   });
   if (!res.ok) throw new Error('Failed to load picks');
   return res.json();
+}
+
+export async function getOtherPicksForMatch(
+  token: string,
+  leagueId: string,
+  matchId: string,
+) {
+  const params = new URLSearchParams();
+  params.set('leagueId', leagueId);
+  params.set('matchId', matchId);
+
+  const res = await fetch(`${API_BASE}/picks/others?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to load other picks (${res.status})`);
+  }
+
+  return (await res.json()) as ApiOtherMatchPicksResponse;
+}
+
+export async function getMyMatchBreakdown(
+  token: string,
+  leagueId: string,
+  matchId: string,
+) {
+  const params = new URLSearchParams();
+  params.set('leagueId', leagueId);
+  params.set('matchId', matchId);
+
+  const res = await fetch(`${API_BASE}/picks/me/match-breakdown?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to load match breakdown (${res.status})`);
+  }
+
+  return (await res.json()) as ApiMyMatchBreakdown;
 }
 
 export async function upsertPick(
@@ -243,6 +292,37 @@ export type ApiPick = {
   updatedAt: string;
   predTotalHits?: number | null;
   predTotalErrors?: number | null;
+};
+
+export type ApiOtherMatchPick = {
+  userId: string;
+  displayName: string | null;
+  homePred: number;
+  awayPred: number;
+  predTotalHits?: number | null;
+  predTotalErrors?: number | null;
+  status: string;
+  updatedAt: string;
+  totalPoints: number | null;
+  breakdown: Array<{ code: string; label: string; points: number }>;
+};
+
+export type ApiOtherMatchPicksResponse = {
+  locked: boolean;
+  canReveal: boolean;
+  resultConfirmed: boolean;
+  leagueId: string;
+  matchId: string;
+  rows: ApiOtherMatchPick[];
+};
+
+export type ApiMyMatchBreakdown = {
+  available: boolean;
+  leagueId: string;
+  matchId: string;
+  ruleIdUsed: string | null;
+  totalPoints: number;
+  breakdown: Array<{ code: string; label: string; points: number }>;
 };
 
 export type ApiLeague = {

@@ -6,6 +6,8 @@ import {
   getCatalog,
   getMatches,
   getMyLeagues,
+  getOtherPicksForMatch,
+  getMyMatchBreakdown,
   getScoringRule,
   listPicks,
   setActiveSeason,
@@ -14,6 +16,8 @@ import {
   type ApiPick,
   type ApiLeague,
   type ApiScoringRule,
+  type ApiOtherMatchPicksResponse,
+  type ApiMyMatchBreakdown,
   type CatalogSport,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -155,6 +159,15 @@ export default function MatchesPage() {
   const [activeRule, setActiveRule] = useState<ApiScoringRule | null>(null);
   const [loadingRule, setLoadingRule] = useState(false);
 
+  const [othersOpenByMatchId, setOthersOpenByMatchId] = useState<Record<string, boolean>>({});
+  const [othersLoadingByMatchId, setOthersLoadingByMatchId] = useState<Record<string, boolean>>({});
+  const [othersByMatchId, setOthersByMatchId] = useState<Record<string, ApiOtherMatchPicksResponse>>({});
+  const [otherDetailOpenByKey, setOtherDetailOpenByKey] = useState<Record<string, boolean>>({});
+
+  const [myBreakdownOpenByMatchId, setMyBreakdownOpenByMatchId] = useState<Record<string, boolean>>({});
+  const [myBreakdownLoadingByMatchId, setMyBreakdownLoadingByMatchId] = useState<Record<string, boolean>>({});
+  const [myBreakdownByMatchId, setMyBreakdownByMatchId] = useState<Record<string, ApiMyMatchBreakdown>>({});
+
   // Cascada Sport → Competition → Season (Evento)
   const [catalog, setCatalog] = useState<CatalogSport[]>([]);
   const [sportId, setSportId] = useState<string>('');
@@ -227,6 +240,13 @@ export default function MatchesPage() {
       setPicksByMatchId({});
       setPicksLeagueId(null);
       setLoadingPicks(false);
+      setOthersOpenByMatchId({});
+      setOthersLoadingByMatchId({});
+      setOthersByMatchId({});
+      setOtherDetailOpenByKey({});
+      setMyBreakdownOpenByMatchId({});
+      setMyBreakdownLoadingByMatchId({});
+      setMyBreakdownByMatchId({});
     }
   }, [effectiveLeagueId]);
 
@@ -796,6 +816,74 @@ export default function MatchesPage() {
 
   const activeLeagueLabel = activeLeague ? `${activeLeague.name} · Código: ${activeLeague.joinCode}` : '—';
 
+  async function toggleOthers(matchId: string) {
+    setOthersOpenByMatchId((prev) => {
+      const next = !prev[matchId];
+      return { ...prev, [matchId]: next };
+    });
+
+    if (!token || !effectiveLeagueId || othersByMatchId[matchId]) return;
+
+    setOthersLoadingByMatchId((prev) => ({ ...prev, [matchId]: true }));
+    try {
+      const data = await getOtherPicksForMatch(token, effectiveLeagueId, matchId);
+      setOthersByMatchId((prev) => ({ ...prev, [matchId]: data }));
+    } catch (e) {
+      console.error('Error cargando picks de otros', e);
+      setOthersByMatchId((prev) => ({
+        ...prev,
+        [matchId]: {
+          locked: true,
+          canReveal: false,
+          resultConfirmed: false,
+          leagueId: effectiveLeagueId,
+          matchId,
+          rows: [],
+        },
+      }));
+    } finally {
+      setOthersLoadingByMatchId((prev) => ({ ...prev, [matchId]: false }));
+    }
+  }
+
+  function toggleOtherDetail(matchId: string, userId: string) {
+    const key = `${matchId}:${userId}`;
+    setOtherDetailOpenByKey((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  }
+
+  async function toggleMyBreakdown(matchId: string) {
+    setMyBreakdownOpenByMatchId((prev) => {
+      const next = !prev[matchId];
+      return { ...prev, [matchId]: next };
+    });
+
+    if (!token || !effectiveLeagueId || myBreakdownByMatchId[matchId]) return;
+
+    setMyBreakdownLoadingByMatchId((prev) => ({ ...prev, [matchId]: true }));
+    try {
+      const data = await getMyMatchBreakdown(token, effectiveLeagueId, matchId);
+      setMyBreakdownByMatchId((prev) => ({ ...prev, [matchId]: data }));
+    } catch (e) {
+      console.error('Error cargando breakdown del partido', e);
+      setMyBreakdownByMatchId((prev) => ({
+        ...prev,
+        [matchId]: {
+          available: false,
+          leagueId: effectiveLeagueId,
+          matchId,
+          ruleIdUsed: null,
+          totalPoints: 0,
+          breakdown: [],
+        },
+      }));
+    } finally {
+      setMyBreakdownLoadingByMatchId((prev) => ({ ...prev, [matchId]: false }));
+    }
+  }
+
   return (
     <div className="min-h-screen">
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
@@ -1138,55 +1226,211 @@ export default function MatchesPage() {
                             </div>
                           )}
 
-                          <div className="text-xs text-[color:var(--muted)] mt-2">
-                            <div>Hora local: {kickoffLabel || '—'}</div>
-                            {closeTs ? (
-                              locked ? (
-                                <div className="text-red-500">Cerrado</div>
-                              ) : (
-                                <div>
-                                  Cierra en: <strong>{formatCountdown(Math.max(0, remainingMs ?? 0))}</strong>
-                                </div>
-                              )
-                            ) : (
-                              <div>Cierre: —</div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          {m.score ? (
-                            <div className="flex flex-col items-end">
-                              <div className="text-[11px] text-[color:var(--muted)] leading-none mb-1">Resultado oficial del partido</div>
-                              <div className="px-3 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm">
-                                {m.score.home} - {m.score.away}
+                          {othersOpenByMatchId[m.id] && (
+                            <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <div className="text-sm font-semibold">Pronósticos de otros participantes</div>
                               </div>
-                            </div>
-                          ) : (
-                            <div className="px-3 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm text-[color:var(--muted)]">
-                              {m.status}
+
+                              {othersLoadingByMatchId[m.id] ? (
+                                <div className="text-xs text-[color:var(--muted)]">Cargando pronósticos…</div>
+                              ) : othersByMatchId[m.id]?.locked ? (
+                                <div className="text-xs text-[color:var(--muted)]">
+                                  🔒 Podrás revisar los pronósticos de los demás una vez finalice el tiempo de pronósticos.
+                                </div>
+                              ) : !othersByMatchId[m.id] || othersByMatchId[m.id].rows.length === 0 ? (
+                                <div className="text-xs text-[color:var(--muted)]">
+                                  Aún no hay pronósticos de otros participantes para este partido.
+                                </div>
+                              ) : (
+                                <div className="grid gap-3">
+                                  {othersByMatchId[m.id].rows.map((r) => {
+                                    const detailKey = `${m.id}:${r.userId}`;
+                                    const detailOpen = !!otherDetailOpenByKey[detailKey];
+
+                                    return (
+                                      <div
+                                        key={`${m.id}-${r.userId}`}
+                                        className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
+                                      >
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <div className="font-medium truncate">{r.displayName ?? r.userId.slice(0, 8)}</div>
+                                            <div className="text-xs text-[color:var(--muted)]">{r.status}</div>
+                                          </div>
+
+                                          <div className="text-right">
+                                            <div className="font-medium">
+                                              {r.homePred} - {r.awayPred}
+                                            </div>
+                                            {(r.predTotalHits != null || r.predTotalErrors != null) && (
+                                              <div className="text-xs text-[color:var(--muted)]">
+                                                {r.predTotalHits != null && <span>H: {r.predTotalHits}</span>}
+                                                {r.predTotalErrors != null && (
+                                                  <span>{r.predTotalHits != null ? ' · ' : ''}E: {r.predTotalErrors}</span>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {othersByMatchId[m.id].resultConfirmed ? (
+                                          <div className="mt-3">
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => toggleOtherDetail(m.id, r.userId)}
+                                            >
+                                              {detailOpen ? 'Ocultar detalle' : 'Ver detalle'}
+                                            </Button>
+
+                                            {detailOpen && (
+                                              <div className="mt-3 grid gap-1">
+                                                <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
+                                                  <span>Concepto</span>
+                                                  <span className="font-semibold">Pts</span>
+                                                </div>
+
+                                                {r.breakdown.map((b) => (
+                                                  <div
+                                                    key={`${m.id}-${r.userId}-${b.code}`}
+                                                    className="flex items-center justify-between text-sm"
+                                                  >
+                                                    <span className="truncate text-[color:var(--muted)]">{b.label}</span>
+                                                    <span className="font-semibold">{b.points}</span>
+                                                  </div>
+                                                ))}
+
+                                                <div className="mt-2 pt-2 border-t border-[var(--border)] flex items-center justify-between text-sm">
+                                                  <span className="font-medium">Total</span>
+                                                  <span className="font-semibold">{r.totalPoints ?? 0} pts</span>
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="mt-3 text-xs text-[color:var(--muted)]">
+                                            El desglose de puntos estará disponible cuando el resultado oficial del partido sea confirmado.
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           )}
 
-                          <Button
-                            size="sm"
-                            variant={locked ? 'outline' : 'primary'}
-                            onClick={() => openPickModal(m)}
-                            disabled={!effectiveLeagueId || locked || loadingPicks}
-                            title={
-                              !effectiveLeagueId
-                                ? 'Selecciona una liga primero'
-                                : loadingPicks
-                                  ? 'Cargando picks de la liga...'
-                                  : locked
-                                    ? 'Partido cerrado. Pick bloqueado.'
-                                    : hasPick
-                                      ? 'Editar pronóstico'
-                                      : 'Pronosticar'
-                            }
-                          >
-                            {locked ? 'Cerrado' : hasPick ? 'Editar' : 'Pronosticar'}
-                          </Button>
+                          {myBreakdownOpenByMatchId[m.id] && (
+                            <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+                              <div className="text-sm font-semibold mb-2">Cuántos puntos sumé?</div>
+
+                              {myBreakdownLoadingByMatchId[m.id] ? (
+                                <div className="text-xs text-[color:var(--muted)]">Cargando desglose…</div>
+                              ) : !myBreakdownByMatchId[m.id]?.available ? (
+                                <div className="text-xs text-[color:var(--muted)]">
+                                  Este desglose estará disponible cuando el resultado oficial del partido esté confirmado.
+                                </div>
+                              ) : (
+                                <div className="grid gap-1">
+                                  <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
+                                    <span>Concepto</span>
+                                    <span className="font-semibold">Pts</span>
+                                  </div>
+
+                                  {myBreakdownByMatchId[m.id].breakdown.map((r) => (
+                                    <div key={`${m.id}-${r.code}`} className="flex items-center justify-between text-sm">
+                                      <span className="truncate text-[color:var(--muted)]">{r.label}</span>
+                                      <span className="font-semibold">{r.points}</span>
+                                    </div>
+                                  ))}
+
+                                  <div className="mt-2 pt-2 border-t border-[var(--border)] flex items-center justify-between text-sm">
+                                    <span className="font-medium">Total</span>
+                                    <span className="font-semibold">{myBreakdownByMatchId[m.id].totalPoints} pts</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex flex-col items-end gap-2">
+                            <div className="flex items-center gap-3">
+                              {m.score ? (
+                                <div className="flex flex-col items-end">
+                                  <div className="text-[11px] text-[color:var(--muted)] leading-none mb-1">Resultado oficial del partido</div>
+                                  <div className="px-3 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm">
+                                    {m.score.home} - {m.score.away}
+                                  </div>
+
+                                  {(m.score.totalHits != null || m.score.totalErrors != null) && (
+                                    <div className="mt-1 text-xs text-[color:var(--muted)]">
+                                      {m.score.totalHits != null && <span>H: {m.score.totalHits}</span>}
+                                      {m.score.totalErrors != null && (
+                                        <span>{m.score.totalHits != null ? ' · ' : ''}E: {m.score.totalErrors}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="px-3 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm text-[color:var(--muted)]">
+                                  {m.status}
+                                </div>
+                              )}
+
+                              <Button
+                                size="sm"
+                                variant={locked ? 'outline' : 'primary'}
+                                onClick={() => openPickModal(m)}
+                                disabled={!effectiveLeagueId || locked || loadingPicks}
+                                title={
+                                  !effectiveLeagueId
+                                    ? 'Selecciona una liga primero'
+                                    : loadingPicks
+                                      ? 'Cargando picks de la liga...'
+                                      : locked
+                                        ? 'Partido cerrado. Pick bloqueado.'
+                                        : hasPick
+                                          ? 'Editar pronóstico'
+                                          : 'Pronosticar'
+                                }
+                              >
+                                {locked ? 'Cerrado' : hasPick ? 'Editar' : 'Pronosticar'}
+                              </Button>
+                            </div>
+                          </div>
+
+                          {effectiveLeagueId && (
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void toggleOthers(m.id)}
+                                disabled={!effectiveLeagueId}
+                                title={!effectiveLeagueId ? 'Selecciona una liga primero' : 'Ver pronósticos de otros participantes'}
+                              >
+                                Ver pronósticos de otros
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void toggleMyBreakdown(m.id)}
+                                disabled={!effectiveLeagueId || !m.resultConfirmed}
+                                title={
+                                  !effectiveLeagueId
+                                    ? 'Selecciona una liga primero'
+                                    : !m.resultConfirmed
+                                      ? 'Disponible cuando el resultado oficial esté confirmado'
+                                      : 'Ver desglose de puntos de este partido'
+                                }
+                              >
+                                Cuántos puntos sumé?
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

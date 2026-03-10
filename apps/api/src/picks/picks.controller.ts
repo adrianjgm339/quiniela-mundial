@@ -14,12 +14,32 @@ import { PicksService } from './picks.service';
 @Controller('picks')
 @UseGuards(JwtAuthGuard)
 export class PicksController {
-  constructor(private readonly picks: PicksService) {}
+  constructor(private readonly picks: PicksService) { }
 
   @Get()
   list(@Req() req: any, @Query('leagueId') leagueId: string) {
     const userId = req.user.userId ?? req.user.id ?? req.user.sub;
     return this.picks.list({ userId, leagueId });
+  }
+
+  @Get('others')
+  othersForMatch(
+    @Req() req: any,
+    @Query('leagueId') leagueId: string,
+    @Query('matchId') matchId: string,
+  ) {
+    const viewerUserId = req.user.userId ?? req.user.id ?? req.user.sub;
+    return this.picks.othersForMatch({ viewerUserId, leagueId, matchId });
+  }
+
+  @Get('me/match-breakdown')
+  myMatchBreakdown(
+    @Req() req: any,
+    @Query('leagueId') leagueId: string,
+    @Query('matchId') matchId: string,
+  ) {
+    const userId = req.user.userId ?? req.user.id ?? req.user.sub;
+    return this.picks.myMatchBreakdown({ userId, leagueId, matchId });
   }
 
   @Put()
