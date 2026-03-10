@@ -8,9 +8,13 @@ import {
   getCountryLeaderboard,
   getMyLeagues,
   getCatalog,
+  getScoringRule,
+  getSeasonConcepts,
   type ApiLeague,
   type LeaderboardRow,
   type CatalogSport,
+  type ApiScoringRule,
+  type ApiSeasonConcept,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -29,6 +33,72 @@ function getErrorMessage(raw: unknown): string {
   return String(raw ?? '');
 }
 
+type RankingCriteriaRow = {
+  code: string;
+  label: string;
+  points: number;
+};
+
+function buildCriteriaRows(rule: ApiScoringRule, concepts: ApiSeasonConcept[]): RankingCriteriaRow[] {
+  const labelByCode = new Map(
+    (concepts ?? []).map((c) => [c.code, (c.label || '').trim() || c.code]),
+  );
+
+  return (rule.details ?? [])
+    .filter((d) => Number(d.points || 0) > 0)
+    .map((d) => ({
+      code: d.code,
+      label: labelByCode.get(d.code) || d.code,
+      points: d.points,
+    }));
+}
+
+function CriteriaCard({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: RankingCriteriaRow[];
+}) {
+  return (
+    <Card className="lg:sticky lg:top-24 overflow-hidden self-start lg:max-w-[260px]">
+      <div className="px-3 py-2.5 border-b border-[var(--border)] text-sm font-semibold">
+        {title}
+      </div>
+
+      <div className="overflow-hidden">
+        <table className="w-full text-[13px]">
+          <thead className="text-[color:var(--muted)]">
+            <tr className="border-b border-[var(--border)]">
+              <th className="text-left px-3 py-2 font-semibold">Desglose por concepto</th>
+              <th className="text-right px-3 py-2 w-16 font-semibold">Pts</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.code} className="border-b border-[var(--border)] last:border-b-0">
+                <td className="px-3 py-1.5 align-top">
+                  <div className="font-medium leading-snug">{r.label}</div>
+                </td>
+                <td className="px-3 py-1.5 text-right font-semibold align-top">{r.points}</td>
+              </tr>
+            ))}
+
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={2} className="px-3 py-2.5 text-[13px] text-[color:var(--muted)]">
+                  No hay conceptos con puntos configurados para este ranking.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 function RowTable({
   title,
   rows,
@@ -40,7 +110,9 @@ function RowTable({
 }) {
   return (
     <Card className="overflow-hidden">
-      <div className="px-4 py-3 border-b border-[var(--border)] font-medium">{title}</div>
+      <div className="px-4 py-3 border-b border-[var(--border)] text-base font-semibold">
+        {title}
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-[color:var(--muted)]">
@@ -57,19 +129,55 @@ function RowTable({
               return (
                 <tr
                   key={r.userId}
-                  className={`border-b border-[var(--border)] ${isMe ? 'font-medium' : ''}`}
-                  style={
-                    isMe
-                      ? {
-                          background: 'color-mix(in srgb, var(--primary) 10%, transparent)',
-                          boxShadow: 'inset 3px 0 0 0 var(--primary)',
-                        }
-                      : undefined
-                  }
+                  className={`border-b border-[var(--border)] ${isMe ? 'font-semibold' : ''}`}
                 >
-                  <td className="px-4 py-2">{r.rank}</td>
-                  <td className="px-4 py-2">{r.displayName ?? r.userId.slice(0, 8)}</td>
-                  <td className="px-4 py-2 text-right font-semibold">{r.points}</td>
+                  <td
+                    className="px-4 py-2"
+                    style={
+                      isMe
+                        ? {
+                          backgroundColor: 'var(--current-user-row-bg)',
+                          borderTop: '1px solid var(--current-user-row-border)',
+                          borderBottom: '1px solid var(--current-user-row-border)',
+                          borderLeft: '4px solid var(--current-user-row-accent)',
+                        }
+                        : undefined
+                    }
+                  >
+                    {r.rank}
+                  </td>
+                  <td
+                    className="px-4 py-2"
+                    style={
+                      isMe
+                        ? {
+                          backgroundColor: 'var(--current-user-row-bg)',
+                          borderTop: '1px solid var(--current-user-row-border)',
+                          borderBottom: '1px solid var(--current-user-row-border)',
+                        }
+                        : undefined
+                    }
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>{r.displayName ?? r.userId.slice(0, 8)}</span>
+                      {isMe ? <Badge className="text-[11px] px-1.5 py-0">Tú</Badge> : null}
+                    </div>
+                  </td>
+                  <td
+                    className="px-4 py-2 text-right font-semibold"
+                    style={
+                      isMe
+                        ? {
+                          backgroundColor: 'var(--current-user-row-bg)',
+                          borderTop: '1px solid var(--current-user-row-border)',
+                          borderBottom: '1px solid var(--current-user-row-border)',
+                          borderRight: '1px solid var(--current-user-row-border)',
+                        }
+                        : undefined
+                    }
+                  >
+                    {r.points}
+                  </td>
                 </tr>
               );
             })}
@@ -159,6 +267,8 @@ export default function RankingsPage() {
 
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const [me, setMe] = useState<LeaderboardRow | null>(null);
+  const [criteriaTitle, setCriteriaTitle] = useState<string>('');
+  const [criteriaRows, setCriteriaRows] = useState<RankingCriteriaRow[]>([]);
 
   const sportOptions = useMemo(() => catalog ?? [], [catalog]);
 
@@ -179,10 +289,23 @@ export default function RankingsPage() {
   }, [leagues, seasonId]);
 
   const title = useMemo(() => {
-    if (tab === 'LEAGUE') return `${leagueTitle} · Ranking`;
-    if (tab === 'WORLD') return 'Mundial · Ranking';
-    return `${countryCode.toUpperCase()} · Ranking`;
+    if (tab === 'LEAGUE') return `${leagueTitle} · Ranking (Top 100)`;
+    if (tab === 'WORLD') return 'Mundial · Ranking (Top 100)';
+    return `${countryCode.toUpperCase()} · Ranking (Top 100)`;
   }, [tab, leagueTitle, countryCode]);
+
+  const loadCriteria = useCallback(
+    async (token: string, ruleId: string, currentSeasonId: string, nextTitle: string) => {
+      const [rule, concepts] = await Promise.all([
+        getScoringRule(token, ruleId),
+        currentSeasonId ? getSeasonConcepts(token, currentSeasonId) : Promise.resolve([] as ApiSeasonConcept[]),
+      ]);
+
+      setCriteriaTitle(nextTitle);
+      setCriteriaRows(buildCriteriaRows(rule, concepts));
+    },
+    [],
+  );
 
   // Cargar countryCode + catálogo + mis ligas y decidir defaults coherentes con filtros
   useEffect(() => {
@@ -287,6 +410,8 @@ export default function RankingsPage() {
 
     setLoading(true);
     setError(null);
+    setCriteriaTitle('');
+    setCriteriaRows([]);
 
     void (async () => {
       try {
@@ -316,11 +441,18 @@ export default function RankingsPage() {
             return;
           }
 
-          const data = await getLeagueLeaderboard(token, selectedLeagueId, 50);
+          const data = await getLeagueLeaderboard(token, selectedLeagueId, 100);
           setRows(data.top);
           setMe(data.me);
           setLeagueTitle(`${data.league.name} (${data.league.joinCode})`);
           setRuleInfo(`Regla usada: ${data.ruleIdUsed}`);
+
+          await loadCriteria(
+            token,
+            data.ruleIdUsed,
+            seasonId,
+            'Criterios para sumar puntos en la liga seleccionada',
+          );
         } else if (tab === 'WORLD') {
           if (!seasonId) {
             setRows([]);
@@ -330,11 +462,18 @@ export default function RankingsPage() {
             return;
           }
 
-          const data = await getWorldLeaderboard(token, 50, seasonId);
+          const data = await getWorldLeaderboard(token, 100, seasonId);
           setRows(data.top);
           setMe(data.me);
           setLeagueTitle('Liga');
           setRuleInfo(`Regla: ${data.ruleIdUsed} · Modo: ${data.bestMode}`);
+
+          await loadCriteria(
+            token,
+            data.ruleIdUsed,
+            seasonId,
+            'Criterios para sumar puntos en el ranking mundial',
+          );
         } else {
           // COUNTRY
           if (!countryCode) {
@@ -353,12 +492,19 @@ export default function RankingsPage() {
             return;
           }
 
-          const data = await getCountryLeaderboard(token, countryCode.toUpperCase(), 50, seasonId);
+          const data = await getCountryLeaderboard(token, countryCode.toUpperCase(), 100, seasonId);
 
           setRows(data.top);
           setMe(data.me);
           setLeagueTitle('Liga');
           setRuleInfo(`Regla: ${data.ruleIdUsed} · Modo: ${data.bestMode}`);
+
+          await loadCriteria(
+            token,
+            data.ruleIdUsed,
+            seasonId,
+            'Criterios para sumar puntos en el ranking por país',
+          );
         }
       } catch (e: unknown) {
         setError(getErrorMessage(e) || 'Error cargando ranking');
@@ -366,7 +512,7 @@ export default function RankingsPage() {
         setLoading(false);
       }
     })();
-  }, [tab, countryCode, selectedLeagueId, seasonId, leagues.length, locale, router, pushRankingsQuery]);
+  }, [tab, countryCode, selectedLeagueId, seasonId, leagues.length, locale, router, pushRankingsQuery, loadCriteria]);
 
   return (
     <div className="min-h-screen">
@@ -535,7 +681,12 @@ export default function RankingsPage() {
           </Card>
         )}
 
-        {!loading && !error && <RowTable title={title} rows={rows} me={me} />}
+        {!loading && !error && (
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-5 items-start">
+            <RowTable title={title} rows={rows} me={me} />
+            <CriteriaCard title={criteriaTitle || 'Criterios para sumar puntos'} rows={criteriaRows} />
+          </div>
+        )}
       </div>
     </div>
   );

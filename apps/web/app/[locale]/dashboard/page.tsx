@@ -8,7 +8,11 @@ import {
   getLeagueLeaderboard,
   getWorldLeaderboard,
   getMyPointsBreakdown,
+  getScoringRule,
+  getSeasonConcepts,
   ApiPointsBreakdown,
+  type ApiScoringRule,
+  type ApiSeasonConcept,
   listPicks,
   type ApiMatch,
   type ApiLeague,
@@ -52,6 +56,26 @@ type MeResponse = User & {
   activeSeason?: ActiveSeason | null;
   countryCode?: string | null;
 };
+
+type CriteriaRow = {
+  code: string;
+  label: string;
+  points: number;
+};
+
+function buildCriteriaRows(rule: ApiScoringRule, concepts: ApiSeasonConcept[]): CriteriaRow[] {
+  const labelByCode = new Map(
+    (concepts ?? []).map((c) => [c.code, (c.label || "").trim() || c.code]),
+  );
+
+  return (rule.details ?? [])
+    .filter((d) => Number(d.points || 0) > 0)
+    .map((d) => ({
+      code: d.code,
+      label: labelByCode.get(d.code) || d.code,
+      points: d.points,
+    }));
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -104,6 +128,8 @@ export default function DashboardPage() {
 
   const [pointsBreakdown, setPointsBreakdown] = useState<ApiPointsBreakdown | null>(null);
   const [pbLoading, setPbLoading] = useState(false);
+  const [worldCriteriaRows, setWorldCriteriaRows] = useState<CriteriaRow[]>([]);
+  const [worldCriteriaLoading, setWorldCriteriaLoading] = useState(false);
 
   function readActiveSeasonFromLocalStorage(): ActiveSeason {
     const seasonId = localStorage.getItem("activeSeasonId") ?? "";
@@ -201,6 +227,7 @@ export default function DashboardPage() {
         setTopTitle(`Top 10 · ${lb.league.name}`);
         setTopRows(lb.top ?? []);
         setMyTopRow(lb.me ?? null);
+        setWorldCriteriaRows([]);
         setPbLoading(true);
         try {
           const pb = await getMyPointsBreakdown(t, nextLeagueId);
@@ -218,16 +245,47 @@ export default function DashboardPage() {
         setTopRows(wb.top ?? []);
         setMyTopRow(wb.me ?? null);
         setPointsBreakdown(null);
+        await loadWorldCriteria(t, seasonId);
       } else {
         setTopScope(null);
         setTopTitle("Top 10");
         setTopRows([]);
         setMyTopRow(null);
         setPointsBreakdown(null);
+        setWorldCriteriaRows([]);
       }
     } catch (e) {
       console.error("Dashboard applyActiveLeague error", e);
       // no mostramos error blocking: solo dejamos el último estado válido
+    }
+  }
+
+  async function loadWorldCriteria(token: string, seasonId: string) {
+    if (!seasonId) {
+      setWorldCriteriaRows([]);
+      return;
+    }
+
+    setWorldCriteriaLoading(true);
+    try {
+      const wb = await getWorldLeaderboard(token, 10, seasonId);
+      const ruleId = wb.ruleIdUsed;
+      if (!ruleId) {
+        setWorldCriteriaRows([]);
+        return;
+      }
+
+      const [rule, concepts] = await Promise.all([
+        getScoringRule(token, ruleId),
+        getSeasonConcepts(token, seasonId),
+      ]);
+
+      setWorldCriteriaRows(buildCriteriaRows(rule, concepts));
+    } catch (e) {
+      console.error("Dashboard world criteria error", e);
+      setWorldCriteriaRows([]);
+    } finally {
+      setWorldCriteriaLoading(false);
     }
   }
 
@@ -346,6 +404,7 @@ export default function DashboardPage() {
           setTopTitle(`Top 10 · ${lb.league.name}`);
           setTopRows(lb.top ?? []);
           setMyTopRow(lb.me ?? null);
+          setWorldCriteriaRows([]);
           setPbLoading(true);
           try {
             const pb = await getMyPointsBreakdown(t, storedLeagueId);
@@ -363,12 +422,14 @@ export default function DashboardPage() {
           setTopRows(wb.top ?? []);
           setMyTopRow(wb.me ?? null);
           setPointsBreakdown(null);
+          await loadWorldCriteria(t, seasonId);
         } else {
           setTopScope(null);
           setTopTitle("Top 10");
           setTopRows([]);
           setMyTopRow(null);
           setPointsBreakdown(null);
+          setWorldCriteriaRows([]);
         }
       } catch (e: unknown) {
         // No tumbamos dashboard por widgets
@@ -660,13 +721,63 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {topRows.map((r) => (
-                      <tr key={r.userId} className="border-b border-[var(--border)]">
-                        <td className="px-4 py-2">{r.rank}</td>
-                        <td className="px-4 py-2">{r.displayName ?? r.userId.slice(0, 8)}</td>
-                        <td className="px-4 py-2 text-right font-semibold">{r.points}</td>
-                      </tr>
-                    ))}
+                    {topRows.map((r) => {
+                      const isMe = !!user && r.userId === user.id;
+
+                      return (
+                        <tr key={r.userId} className={`border-b border-[var(--border)] ${isMe ? "font-semibold" : ""}`}>
+                          <td
+                            className="px-4 py-2"
+                            style={
+                              isMe
+                                ? {
+                                  backgroundColor: "var(--current-user-row-bg)",
+                                  borderTop: "1px solid var(--current-user-row-border)",
+                                  borderBottom: "1px solid var(--current-user-row-border)",
+                                  borderLeft: "4px solid var(--current-user-row-accent)",
+                                }
+                                : undefined
+                            }
+                          >
+                            {r.rank}
+                          </td>
+
+                          <td
+                            className="px-4 py-2"
+                            style={
+                              isMe
+                                ? {
+                                  backgroundColor: "var(--current-user-row-bg)",
+                                  borderTop: "1px solid var(--current-user-row-border)",
+                                  borderBottom: "1px solid var(--current-user-row-border)",
+                                }
+                                : undefined
+                            }
+                          >
+                            <div className="flex items-center gap-2">
+                              <span>{r.displayName ?? r.userId.slice(0, 8)}</span>
+                              {isMe ? <span className="inline-flex rounded-full border border-[var(--border)] px-1.5 py-0 text-[11px]">Tú</span> : null}
+                            </div>
+                          </td>
+
+                          <td
+                            className="px-4 py-2 text-right font-semibold"
+                            style={
+                              isMe
+                                ? {
+                                  backgroundColor: "var(--current-user-row-bg)",
+                                  borderTop: "1px solid var(--current-user-row-border)",
+                                  borderBottom: "1px solid var(--current-user-row-border)",
+                                  borderRight: "1px solid var(--current-user-row-border)",
+                                }
+                                : undefined
+                            }
+                          >
+                            {r.points}
+                          </td>
+                        </tr>
+                      );
+                    })}
 
                     {topRows.length === 0 && (
                       <tr>
@@ -783,17 +894,32 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="border-t border-[var(--border)] pt-3 grid gap-2">
-                      <div className="text-[color:var(--muted)]">Desglose por concepto</div>
-
-                      {pbLoading ? (
-                        <div className="text-xs text-[color:var(--muted)]">Cargando desglose…</div>
-                      ) : !activeLeagueId ? (
-                        <div className="text-xs text-[color:var(--muted)]">Selecciona una liga para ver el desglose.</div>
-                      ) : !pointsBreakdown || pointsBreakdown.breakdown.length === 0 ? (
-                        <div className="text-xs text-[color:var(--muted)]">Aún no hay puntos desglosados (requiere resultados confirmados).</div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-[color:var(--muted)]">Desglose por concepto</span>
+                        <span className="text-[color:var(--muted)] font-semibold">Pts</span>
+                      </div>
+                      {activeLeagueId ? (
+                        pbLoading ? (
+                          <div className="text-xs text-[color:var(--muted)]">Cargando desglose…</div>
+                        ) : !pointsBreakdown || pointsBreakdown.breakdown.length === 0 ? (
+                          <div className="text-xs text-[color:var(--muted)]">Aún no hay puntos desglosados (requiere resultados confirmados).</div>
+                        ) : (
+                          <div className="grid gap-1">
+                            {pointsBreakdown.breakdown.map((r) => (
+                              <div key={r.code} className="flex items-center justify-between text-sm">
+                                <span className="truncate text-[color:var(--muted)]">{r.label}</span>
+                                <span className="font-semibold">{r.points}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      ) : worldCriteriaLoading ? (
+                        <div className="text-xs text-[color:var(--muted)]">Cargando criterios mundiales…</div>
+                      ) : worldCriteriaRows.length === 0 ? (
+                        <div className="text-xs text-[color:var(--muted)]">No hay criterios configurados para el ranking mundial.</div>
                       ) : (
                         <div className="grid gap-1">
-                          {pointsBreakdown.breakdown.map((r) => (
+                          {worldCriteriaRows.map((r) => (
                             <div key={r.code} className="flex items-center justify-between text-sm">
                               <span className="truncate text-[color:var(--muted)]">{r.label}</span>
                               <span className="font-semibold">{r.points}</span>

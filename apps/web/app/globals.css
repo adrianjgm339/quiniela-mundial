@@ -27,6 +27,11 @@
   --qualify-third-bg: color-mix(in srgb, var(--warning) 18%, transparent);
   --qualify-third-border: color-mix(in srgb, var(--warning) 35%, transparent);
 
+  /* Highlight fila usuario actual (rankings) */
+  --current-user-row-bg: color-mix(in srgb, var(--accent) 26%, var(--card));
+  --current-user-row-border: color-mix(in srgb, var(--accent) 48%, transparent);
+  --current-user-row-accent: var(--accent);
+
   color-scheme: light;
 }
 
@@ -54,6 +59,11 @@ html.dark {
 
   --qualify-third-bg: color-mix(in srgb, var(--warning) 18%, transparent);
   --qualify-third-border: color-mix(in srgb, var(--warning) 35%, transparent);
+
+  /* Highlight fila usuario actual (rankings) */
+  --current-user-row-bg: color-mix(in srgb, var(--accent) 22%, var(--card));
+  --current-user-row-border: color-mix(in srgb, var(--accent) 42%, transparent);
+  --current-user-row-accent: var(--accent);
 
   color-scheme: dark;
 }
