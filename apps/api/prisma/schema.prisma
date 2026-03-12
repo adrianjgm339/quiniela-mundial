@@ -21,6 +21,7 @@ model User {
   joinRequests   LeagueJoinRequest[]
   memberships    LeagueMember[]
   picks          Pick[]
+  notifications  Notification[]
   activeSeason   Season?             @relation(fields: [activeSeasonId], references: [id])
 }
 
@@ -138,6 +139,24 @@ model LeagueJoinRequest {
   @@index([leagueId, status])
 }
 
+model Notification {
+  id        String            @id @default(cuid())
+  userId    String
+  type      NotificationType
+  scope     NotificationScope @default(USER)
+  title     String
+  message   String
+  actionUrl String?
+  isRead    Boolean           @default(false)
+  readAt    DateTime?
+  meta      Json?
+  createdAt DateTime          @default(now())
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@index([userId, createdAt])
+}
+
 model Team {
   id                 String              @id @default(uuid())
   seasonId           String
@@ -170,38 +189,41 @@ model TeamTranslation {
 }
 
 model Match {
-  id              String              @id @default(uuid())
-  seasonId        String
-  externalId      String
-  phaseCode       String
-  groupCode       String?
-  matchNumber     Int?
-  venue           String?
-  utcDateTime     DateTime
-  closeUtc        DateTime?
-  closeMinutes    Int?
-  status          MatchStatus         @default(SCHEDULED)
-  statusRaw       String?
-  resultConfirmed Boolean             @default(false)
-  homeTeamId      String
-  awayTeamId      String
-  homeScore       Int?
-  awayScore       Int?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  advanceMethod   MatchAdvanceMethod?
-  advanceTeamId   String?
-  awayErrors      Int?
-  awayHits        Int?
-  homeErrors      Int?
-  homeHits        Int?
-  awayTeam        Team                @relation("AwayTeam", fields: [awayTeamId], references: [id])
-  homeTeam        Team                @relation("HomeTeam", fields: [homeTeamId], references: [id])
-  season          Season              @relation(fields: [seasonId], references: [id])
-  picks           Pick[]
+  id                String              @id @default(uuid())
+  seasonId          String
+  externalId        String
+  phaseCode         String
+  groupCode         String?
+  matchNumber       Int?
+  venue             String?
+  utcDateTime       DateTime
+  closeUtc          DateTime?
+  closeMinutes      Int?
+  status            MatchStatus         @default(SCHEDULED)
+  statusRaw         String?
+  resultConfirmed   Boolean             @default(false)
+  resultConfirmedAt DateTime?
+  pointsNotifiedAt  DateTime?
+  homeTeamId        String
+  awayTeamId        String
+  homeScore         Int?
+  awayScore         Int?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  advanceMethod     MatchAdvanceMethod?
+  advanceTeamId     String?
+  awayErrors        Int?
+  awayHits          Int?
+  homeErrors        Int?
+  homeHits          Int?
+  awayTeam          Team                @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  homeTeam          Team                @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  season            Season              @relation(fields: [seasonId], references: [id])
+  picks             Pick[]
 
   @@unique([seasonId, externalId])
   @@index([seasonId, utcDateTime])
+  @@index([seasonId, resultConfirmed, resultConfirmedAt])
 }
 
 model Pick {
@@ -436,4 +458,16 @@ enum WaitlistInterest {
   SOCCER
   BASEBALL
   BOTH
+}
+
+enum NotificationType {
+  LEAGUE_JOIN_REQUEST_PENDING
+  LEAGUE_JOIN_APPROVED
+  LEAGUE_JOIN_REJECTED
+  APP_ANNOUNCEMENT
+}
+
+enum NotificationScope {
+  USER
+  SYSTEM
 }

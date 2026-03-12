@@ -441,6 +441,114 @@ export class ScoringService {
     });
   }
 
+  private getTeamDisplayName(team: any) {
+    return (
+      team?.translations?.[0]?.name ||
+      team?.placeholderRule ||
+      team?.externalId ||
+      'Equipo'
+    );
+  }
+
+  private buildConfirmedResultNotification(match: any) {
+    const homeName = this.getTeamDisplayName(match?.homeTeam);
+    const awayName = this.getTeamDisplayName(match?.awayTeam);
+    const label =
+      homeName && awayName
+        ? `${homeName} vs ${awayName}`
+        : match?.matchNumber != null
+          ? `partido #${match.matchNumber}`
+          : match?.externalId
+            ? `partido ${match.externalId}`
+            : 'un partido confirmado';
+
+    return {
+      title: 'Resultado confirmado y puntos recalculados',
+      message: `Ya se confirmó el resultado de ${label} y tus puntos ya fueron recalculados. Revisa /matches para ver el detalle.`,
+      actionUrl: '/matches',
+    };
+  }
+
+  private async notifyUsersConfirmedResultsReady(args: {
+    seasonId?: string | null;
+    matchIds: string[];
+    matchById: Map<string, any>;
+  }) {
+    if (!args.matchIds.length) {
+      return { created: 0, skipped: 0 };
+    }
+
+    const allPicks = await this.prisma.pick.findMany({
+      where: { matchId: { in: args.matchIds } },
+      select: {
+        userId: true,
+        matchId: true,
+      },
+    });
+
+    const candidates = new Map<
+      string,
+      {
+        userId: string;
+        matchId: string;
+        title: string;
+        message: string;
+        actionUrl: string;
+      }
+    >();
+
+    for (const p of allPicks) {
+      const match = args.matchById.get(p.matchId);
+      if (!match) continue;
+
+      const notif = this.buildConfirmedResultNotification(match);
+      const key = `${p.userId}::${p.matchId}`;
+
+      if (!candidates.has(key)) {
+        candidates.set(key, {
+          userId: p.userId,
+          matchId: p.matchId,
+          title: notif.title,
+          message: notif.message,
+          actionUrl: notif.actionUrl,
+        });
+      }
+    }
+
+    let created = 0;
+
+    for (const row of candidates.values()) {
+      await this.prisma.notification.create({
+        data: {
+          userId: row.userId,
+          type: 'APP_ANNOUNCEMENT' as any,
+          title: row.title,
+          message: row.message,
+          actionUrl: row.actionUrl,
+          meta: {
+            seasonId: args.seasonId ?? null,
+            matchId: row.matchId,
+            source: 'scoring.recompute',
+          } as any,
+        },
+      });
+
+      created++;
+    }
+
+    await this.prisma.match.updateMany({
+      where: { id: { in: args.matchIds } },
+      data: {
+        pointsNotifiedAt: new Date(),
+      },
+    });
+
+    return {
+      created,
+      skipped: candidates.size - created,
+    };
+  }
+
   async recompute(opts: { seasonId?: string; cursor?: string; limit?: number }) {
     const FALLBACK_GLOBAL_RULE_ID = 'B01';
 
@@ -460,6 +568,30 @@ export class ScoringService {
       where: {
         ...(opts.seasonId ? { seasonId: opts.seasonId } : {}),
         resultConfirmed: true,
+        resultConfirmedAt: { not: null },
+        pointsNotifiedAt: null,
+      },
+      include: {
+        homeTeam: {
+          select: {
+            externalId: true,
+            placeholderRule: true,
+            translations: {
+              select: { name: true },
+              take: 1,
+            },
+          },
+        },
+        awayTeam: {
+          select: {
+            externalId: true,
+            placeholderRule: true,
+            translations: {
+              select: { name: true },
+              take: 1,
+            },
+          },
+        },
       },
     });
 
@@ -479,7 +611,7 @@ export class ScoringService {
         ok: true,
         seasonId: opts.seasonId ?? null,
         picksProcessed: 0,
-        note: 'No confirmed matches with score found',
+        note: 'No newly confirmed matches pending notification were found',
       };
     }
 
@@ -590,6 +722,21 @@ export class ScoringService {
     }
 
     const nextCursor = picks.length ? picks[picks.length - 1].id : null;
+    const done = picks.length < limit;
+
+    let notificationsCreated = 0;
+    let notificationsSkipped = 0;
+
+    if (done) {
+      const notifyRes = await this.notifyUsersConfirmedResultsReady({
+        seasonId: opts.seasonId ?? null,
+        matchIds,
+        matchById,
+      });
+
+      notificationsCreated = notifyRes.created;
+      notificationsSkipped = notifyRes.skipped;
+    }
 
     return {
       ok: true,
@@ -598,8 +745,10 @@ export class ScoringService {
       picksProcessed: processed,
       totalPicks,
       nextCursor,
-      done: picks.length < limit,
+      done,
       rulesLoaded: Array.from(ruleIds),
+      notificationsCreated,
+      notificationsSkipped,
     };
   }
 }

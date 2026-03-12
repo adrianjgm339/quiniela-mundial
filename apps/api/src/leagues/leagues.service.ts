@@ -108,6 +108,7 @@ export class LeaguesService {
       where: { joinCode },
       select: {
         id: true,
+        name: true,
         seasonId: true,
         joinPolicy: true,
         inviteEnabled: true,
@@ -141,6 +142,12 @@ export class LeaguesService {
         create: { leagueId: league.id, userId, status: 'PENDING' },
         select: { id: true, status: true },
       });
+
+      await this.notifyLeagueManagersOfJoinRequest(
+        league.id,
+        league.name,
+        userId,
+      );
 
       return {
         ok: true,
@@ -637,6 +644,12 @@ export class LeaguesService {
 
     const nextStatus = input.approve ? 'APPROVED' : 'REJECTED';
 
+    const league = await this.prisma.league.findUnique({
+      where: { id: leagueId },
+      select: { id: true, name: true },
+    });
+    if (!league) throw new NotFoundException('League not found');
+
     await this.prisma.$transaction(async (tx) => {
       await tx.leagueJoinRequest.update({
         where: { id: req.id },
@@ -660,6 +673,25 @@ export class LeaguesService {
           },
         });
       }
+    });
+
+    await this.createNotification({
+      userId: req.userId,
+      type: input.approve
+        ? 'LEAGUE_JOIN_APPROVED'
+        : 'LEAGUE_JOIN_REJECTED',
+      title: input.approve
+        ? 'Solicitud aprobada'
+        : 'Solicitud rechazada',
+      message: input.approve
+        ? `Tu solicitud para unirte a la liga "${league.name}" fue aprobada.`
+        : `Tu solicitud para unirte a la liga "${league.name}" fue rechazada.`,
+      actionUrl: `/leagues`,
+      meta: {
+        leagueId,
+        requestId: req.id,
+        decidedById: userId,
+      },
     });
 
     return { ok: true };
@@ -726,6 +758,228 @@ export class LeaguesService {
         joinPolicy: true,
         inviteEnabled: true,
       },
+    });
+  }
+
+  async listNotifications(userId: string, limitRaw?: number) {
+    const limit = Math.max(1, Math.min(Number(limitRaw) || 10, 50));
+
+    return this.prisma.notification.findMany({
+      where: { userId },
+      orderBy: [{ isRead: 'asc' }, { createdAt: 'desc' }],
+      take: limit,
+      select: {
+        id: true,
+        type: true,
+        scope: true,
+        title: true,
+        message: true,
+        actionUrl: true,
+        isRead: true,
+        readAt: true,
+        createdAt: true,
+        meta: true,
+      },
+    });
+  }
+
+  async getUnreadNotificationCount(userId: string) {
+    const count = await this.prisma.notification.count({
+      where: { userId, isRead: false },
+    });
+
+    return { count };
+  }
+
+  async markNotificationRead(userId: string, notificationId: string) {
+    const row = await this.prisma.notification.findFirst({
+      where: { id: notificationId, userId },
+      select: { id: true, isRead: true },
+    });
+
+    if (!row) throw new NotFoundException('Notification not found');
+
+    if (row.isRead) return { ok: true };
+
+    await this.prisma.notification.update({
+      where: { id: notificationId },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+
+    return { ok: true };
+  }
+
+  async markAllNotificationsRead(userId: string) {
+    await this.prisma.notification.updateMany({
+      where: { userId, isRead: false },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+
+    return { ok: true };
+  }
+
+  async deleteNotifications(
+    userId: string,
+    notificationIds: string[],
+  ) {
+    const ids = Array.isArray(notificationIds)
+      ? notificationIds.map((x) => String(x || '').trim()).filter(Boolean)
+      : [];
+
+    if (ids.length === 0) {
+      throw new BadRequestException('notificationIds are required');
+    }
+
+    const res = await this.prisma.notification.deleteMany({
+      where: {
+        userId,
+        id: { in: ids },
+      },
+    });
+
+    return {
+      ok: true,
+      deleted: res.count,
+    };
+  }
+
+  async publishAppAnnouncement(
+    userId: string,
+    input: {
+      title: string;
+      message: string;
+      actionUrl?: string | null;
+      userIds?: string[];
+    },
+  ) {
+    const actor = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    if (actor?.role !== 'ADMIN') {
+      throw new ForbiddenException('Only system admins can publish announcements');
+    }
+
+    const title = (input.title || '').trim();
+    const message = (input.message || '').trim();
+    const actionUrl = (input.actionUrl || '').trim() || null;
+
+    if (!title) throw new BadRequestException('title is required');
+    if (!message) throw new BadRequestException('message is required');
+
+    const requestedUserIds = Array.isArray(input.userIds)
+      ? input.userIds.map((x) => String(x || '').trim()).filter(Boolean)
+      : [];
+
+    let targetUserIds: string[] = [];
+
+    if (requestedUserIds.length > 0) {
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: requestedUserIds } },
+        select: { id: true },
+      });
+      targetUserIds = users.map((u) => u.id);
+    } else {
+      const users = await this.prisma.user.findMany({
+        select: { id: true },
+      });
+      targetUserIds = users.map((u) => u.id);
+    }
+
+    if (targetUserIds.length === 0) {
+      return { ok: true, created: 0 };
+    }
+
+    await this.prisma.notification.createMany({
+      data: targetUserIds.map((targetUserId) => ({
+        userId: targetUserId,
+        type: 'APP_ANNOUNCEMENT' as any,
+        scope: 'SYSTEM' as any,
+        title,
+        message,
+        actionUrl,
+        isRead: false,
+        meta: {
+          publishedById: userId,
+        } as any,
+      })),
+    });
+
+    return {
+      ok: true,
+      created: targetUserIds.length,
+    };
+  }
+
+  private async createNotification(input: {
+    userId: string;
+    type:
+    | 'LEAGUE_JOIN_REQUEST_PENDING'
+    | 'LEAGUE_JOIN_APPROVED'
+    | 'LEAGUE_JOIN_REJECTED'
+    | 'APP_ANNOUNCEMENT';
+    title: string;
+    message: string;
+    actionUrl?: string | null;
+    meta?: unknown;
+  }) {
+    return this.prisma.notification.create({
+      data: {
+        userId: input.userId,
+        type: input.type as any,
+        title: input.title,
+        message: input.message,
+        actionUrl: input.actionUrl ?? null,
+        meta: (input.meta ?? null) as any,
+      },
+    });
+  }
+
+  private async notifyLeagueManagersOfJoinRequest(
+    leagueId: string,
+    leagueName: string,
+    requesterUserId: string,
+  ) {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterUserId },
+      select: { displayName: true, email: true },
+    });
+
+    const managers = await this.prisma.leagueMember.findMany({
+      where: {
+        leagueId,
+        status: 'ACTIVE',
+        role: { in: ['OWNER', 'ADMIN'] as any },
+      },
+      select: { userId: true },
+    });
+
+    if (managers.length === 0) return;
+
+    const displayName =
+      (requester?.displayName || '').trim() ||
+      requester?.email ||
+      'Un usuario';
+
+    await this.prisma.notification.createMany({
+      data: managers.map((m) => ({
+        userId: m.userId,
+        type: 'LEAGUE_JOIN_REQUEST_PENDING' as any,
+        title: 'Solicitud pendiente por aprobar',
+        message: `${displayName} quiere unirse a la liga "${leagueName}".`,
+        actionUrl: `/leagues`,
+        meta: {
+          leagueId,
+          requesterUserId,
+        } as any,
+      })),
     });
   }
 }

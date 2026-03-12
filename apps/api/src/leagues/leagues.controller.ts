@@ -4,6 +4,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Req,
   UseGuards,
@@ -152,5 +153,59 @@ export class LeaguesController {
       targetUserId,
       body.role,
     );
+  }
+
+  @Get('notifications')
+  notifications(@Req() req, @Query('limit') limit?: string) {
+    return this.leagues.listNotifications(
+      req.user.userId,
+      limit ? Number(limit) : undefined,
+    );
+  }
+
+  @Get('notifications/unread-count')
+  unreadCount(@Req() req) {
+    return this.leagues.getUnreadNotificationCount(req.user.userId);
+  }
+
+  @Patch('notifications/:notificationId/read')
+  markRead(
+    @Req() req,
+    @Param('notificationId') notificationId: string,
+  ) {
+    return this.leagues.markNotificationRead(
+      req.user.userId,
+      notificationId,
+    );
+  }
+
+  @Patch('notifications/read-all')
+  markAllRead(@Req() req) {
+    return this.leagues.markAllNotificationsRead(req.user.userId);
+  }
+
+  @Delete('notifications')
+  deleteNotifications(
+    @Req() req,
+    @Body() body: { notificationIds: string[] },
+  ) {
+    return this.leagues.deleteNotifications(
+      req.user.userId,
+      body.notificationIds ?? [],
+    );
+  }
+
+  @Post('notifications/announcement')
+  publishAnnouncement(
+    @Req() req,
+    @Body()
+    body: {
+      title: string;
+      message: string;
+      actionUrl?: string | null;
+      userIds?: string[];
+    },
+  ) {
+    return this.leagues.publishAppAnnouncement(req.user.userId, body);
   }
 }

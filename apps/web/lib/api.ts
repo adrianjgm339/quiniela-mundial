@@ -338,6 +338,25 @@ export type ApiLeague = {
   myRole?: 'OWNER' | 'ADMIN' | 'MEMBER';
 };
 
+export type ApiNotificationType =
+  | 'LEAGUE_JOIN_REQUEST_PENDING'
+  | 'LEAGUE_JOIN_APPROVED'
+  | 'LEAGUE_JOIN_REJECTED'
+  | 'APP_ANNOUNCEMENT';
+
+export type ApiNotification = {
+  id: string;
+  type: ApiNotificationType;
+  scope: 'USER' | 'SYSTEM';
+  title: string;
+  message: string;
+  actionUrl?: string | null;
+  isRead: boolean;
+  readAt?: string | null;
+  createdAt: string;
+  meta?: unknown;
+};
+
 export async function getMyLeagues(token: string) {
   const res = await fetch(`${API_BASE}/leagues/mine`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -791,4 +810,113 @@ export async function getMyPointsBreakdown(token: string, leagueId: string) {
   }
 
   return (await res.json()) as ApiPointsBreakdown;
+}
+
+export async function getNotifications(token: string, limit = 10) {
+  const res = await fetch(
+    `${API_BASE}/leagues/notifications?limit=${encodeURIComponent(String(limit))}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    },
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to load notifications (${res.status})`);
+  }
+
+  return (await res.json()) as ApiNotification[];
+}
+
+export async function getUnreadNotificationCount(token: string) {
+  const res = await fetch(`${API_BASE}/leagues/notifications/unread-count`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to load unread count (${res.status})`);
+  }
+
+  return (await res.json()) as { count: number };
+}
+
+export async function markNotificationRead(token: string, notificationId: string) {
+  const res = await fetch(
+    `${API_BASE}/leagues/notifications/${encodeURIComponent(notificationId)}/read`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to mark notification as read (${res.status})`);
+  }
+
+  return (await res.json()) as { ok: boolean };
+}
+
+export async function markAllNotificationsRead(token: string) {
+  const res = await fetch(`${API_BASE}/leagues/notifications/read-all`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to mark all notifications as read (${res.status})`);
+  }
+
+  return (await res.json()) as { ok: boolean };
+}
+
+export async function deleteNotifications(
+  token: string,
+  notificationIds: string[],
+) {
+  const res = await fetch(`${API_BASE}/leagues/notifications`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ notificationIds }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to delete notifications (${res.status})`);
+  }
+
+  return (await res.json()) as { ok: boolean; deleted: number };
+}
+
+export async function publishAppAnnouncement(
+  token: string,
+  input: {
+    title: string;
+    message: string;
+    actionUrl?: string | null;
+    userIds?: string[];
+  },
+) {
+  const res = await fetch(`${API_BASE}/leagues/notifications/announcement`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || `Failed to publish announcement (${res.status})`);
+  }
+
+  return (await res.json()) as { ok: boolean; created: number };
 }

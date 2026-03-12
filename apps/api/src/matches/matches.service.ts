@@ -594,6 +594,8 @@ export class MatchesService {
         awayTeam: { select: { isPlaceholder: true, placeholderRule: true } },
         matchNumber: true,
         resultConfirmed: true,
+        resultConfirmedAt: true,
+        pointsNotifiedAt: true,
         advanceTeamId: true,
         advanceMethod: true,
       },
@@ -700,6 +702,8 @@ export class MatchesService {
             },
             matchNumber: true,
             resultConfirmed: true,
+            resultConfirmedAt: true,
+            pointsNotifiedAt: true,
             advanceTeamId: true,
             advanceMethod: true,
           },
@@ -801,12 +805,26 @@ export class MatchesService {
     const willBeConfirmed =
       dto.resultConfirmed ?? match.resultConfirmed ?? false;
 
+    const wasConfirmed = !!match.resultConfirmed;
+    const justConfirmed = !wasConfirmed && !!willBeConfirmed;
+    const justUnconfirmed = wasConfirmed && !willBeConfirmed;
+
     const updated = await this.prisma.match.update({
       where: { id: matchId },
       data: {
         homeScore: dto.homeScore,
         awayScore: dto.awayScore,
         resultConfirmed: dto.resultConfirmed,
+        resultConfirmedAt: justConfirmed
+          ? new Date()
+          : justUnconfirmed
+            ? null
+            : undefined,
+        pointsNotifiedAt: justConfirmed
+          ? null
+          : justUnconfirmed
+            ? null
+            : undefined,
         advanceTeamId,
         advanceMethod,
         homeHits: dto.homeHits,
