@@ -33,6 +33,50 @@ function isAnyResultFieldPresent(dto: UpdateMatchResultDto) {
   );
 }
 
+function buildKoReferenceTokens(args: {
+  phaseCode: string;
+  matchNumber: number | null;
+}) {
+  const { phaseCode, matchNumber } = args;
+  const n = matchNumber != null ? String(matchNumber) : null;
+
+  const tokens: string[] = [];
+
+  if (n) {
+    tokens.push(`partido ${n}`);
+  }
+
+  // Convención abreviada usada en placeholders de béisbol:
+  // F02 -> QF1..QF4
+  // F03 -> SF1..SF2
+  // F04 -> F1 (si alguna vez se usa)
+  // F05 -> también SF1..SF2 en algunos eventos
+  if (n) {
+    if (phaseCode === 'F02') tokens.push(`QF${n}`);
+    if (phaseCode === 'F03' || phaseCode === 'F05') tokens.push(`SF${n}`);
+    if (phaseCode === 'F04' || phaseCode === 'F07') tokens.push(`F${n}`);
+  }
+
+  return Array.from(new Set(tokens));
+}
+
+function buildPlaceholderRuleOr(tokens: string[]) {
+  const clauses: Array<any> = [];
+
+  for (const token of tokens) {
+    clauses.push(
+      { placeholderRule: { equals: `Ganador ${token}`, mode: 'insensitive' as const } },
+      { placeholderRule: { equals: `Perdedor ${token}`, mode: 'insensitive' as const } },
+      { placeholderRule: { endsWith: token, mode: 'insensitive' as const } },
+      { placeholderRule: { endsWith: `${token})`, mode: 'insensitive' as const } },
+      { placeholderRule: { endsWith: `${token}.`, mode: 'insensitive' as const } },
+      { placeholderRule: { contains: `${token} `, mode: 'insensitive' as const } },
+    );
+  }
+
+  return clauses;
+}
+
 @Injectable()
 export class MatchesService {
   constructor(private prisma: PrismaService) { }
@@ -277,36 +321,30 @@ export class MatchesService {
 
   private async propagateWinnerToNextMatches(args: {
     seasonId: string;
+    phaseCode: string;
     sourceMatchNumber: number | null;
     winnerTeamId: string;
   }) {
-    const { seasonId, sourceMatchNumber, winnerTeamId } = args;
+    const { seasonId, phaseCode, sourceMatchNumber, winnerTeamId } = args;
     if (!sourceMatchNumber) return;
 
-    const key = String(sourceMatchNumber);
-    const token = `partido ${key}`;
+    const tokens = buildKoReferenceTokens({
+      phaseCode,
+      matchNumber: sourceMatchNumber,
+    });
 
-    // 1) Buscar placeholders que referencian este matchNumber de forma segura.
-    // Evita falsos positivos tipo "7" matcheando "77".
     const placeholderTeams = await this.prisma.team.findMany({
       where: {
         seasonId,
         isPlaceholder: true,
-        OR: [
-          { placeholderRule: { endsWith: token, mode: 'insensitive' } },
-          { placeholderRule: { endsWith: `${token})`, mode: 'insensitive' } },
-          { placeholderRule: { endsWith: `${token}.`, mode: 'insensitive' } },
-          { placeholderRule: { contains: `${token} `, mode: 'insensitive' } },
-        ],
+        OR: buildPlaceholderRuleOr(tokens),
       },
-      select: { id: true },
+      select: { id: true, placeholderRule: true },
     });
     if (placeholderTeams.length === 0) return;
 
     const placeholderIds = placeholderTeams.map((t) => t.id);
 
-    // 2) Reemplazar en matches donde HOME o AWAY sea uno de esos placeholders
-    // ⚠️ Solo actualiza si el slot aún es placeholder (no pisa nada ya resuelto).
     await this.prisma.match.updateMany({
       where: {
         seasonId,
@@ -330,51 +368,27 @@ export class MatchesService {
 
   private async propagateLoserToNextMatches(args: {
     seasonId: string;
+    phaseCode: string;
     sourceMatchNumber: number | null;
     loserTeamId: string;
     winnerTeamId: string;
   }) {
-    const { seasonId, sourceMatchNumber, loserTeamId, winnerTeamId } = args;
+    const { seasonId, phaseCode, sourceMatchNumber, loserTeamId, winnerTeamId } = args;
     if (!sourceMatchNumber) return;
 
-    const key = String(sourceMatchNumber);
-    const token = `partido ${key}`;
+    const tokens = buildKoReferenceTokens({
+      phaseCode,
+      matchNumber: sourceMatchNumber,
+    });
 
-    // ✅ IMPORTANTE:
-    // El 3er puesto (F06) debe alimentarse con los PERDEDORES de las semifinales (F05).
-    // Aunque por error el placeholder del 3er puesto estuviera creado como "Ganador partido X",
-    // aquí NO dependemos de la palabra "perdedor": solo verificamos que el placeholder referencie
-    // a "partido X" y que el match destino sea F06.
-    const ruleMatch = [
-      { placeholderRule: { endsWith: token, mode: 'insensitive' as const } },
-      {
-        placeholderRule: {
-          endsWith: `${token})`,
-          mode: 'insensitive' as const,
-        },
-      },
-      {
-        placeholderRule: {
-          endsWith: `${token}.`,
-          mode: 'insensitive' as const,
-        },
-      },
-      {
-        placeholderRule: {
-          contains: `${token} `,
-          mode: 'insensitive' as const,
-        },
-      }, // nota el espacio
-    ];
+    const ruleMatch = buildPlaceholderRuleOr(tokens);
 
     await this.prisma.match.updateMany({
       where: {
         seasonId,
         phaseCode: 'F06',
         OR: [
-          // Si por error el 3er puesto fue alimentado con el GANADOR, lo corregimos
           { homeTeamId: winnerTeamId },
-          // Caso normal: slot placeholder que referencia a "partido X"
           { homeTeam: { isPlaceholder: true, OR: ruleMatch as any } },
         ],
       },
@@ -662,11 +676,18 @@ export class MatchesService {
 
       // Dinámicos: deben resolverse antes de confirmar resultados
       // - Grupos: "1º Grupo A", "3º Grupo A/B/C..."
-      // - KO: "Ganador partido 77", "Perdedor partido 75"
+      // - KO tradicional: "Ganador partido 77", "Perdedor partido 75"
+      // - KO abreviado béisbol: "Ganador QF1", "Ganador SF2"
       return (
         r.includes('grupo') ||
         r.includes('ganador partido') ||
-        r.includes('perdedor partido')
+        r.includes('perdedor partido') ||
+        r.includes('ganador qf') ||
+        r.includes('perdedor qf') ||
+        r.includes('ganador sf') ||
+        r.includes('perdedor sf') ||
+        r.includes('ganador f') ||
+        r.includes('perdedor f')
       );
     }
 
@@ -841,6 +862,7 @@ export class MatchesService {
     if (isKO && willBeConfirmed && advanceTeamId) {
       await this.propagateWinnerToNextMatches({
         seasonId: match.seasonId,
+        phaseCode: match.phaseCode,
         sourceMatchNumber: match.matchNumber ?? null,
         winnerTeamId: advanceTeamId,
       });
@@ -855,6 +877,7 @@ export class MatchesService {
         if (loserTeamId) {
           await this.propagateLoserToNextMatches({
             seasonId: match.seasonId,
+            phaseCode: match.phaseCode,
             sourceMatchNumber: match.matchNumber ?? null,
             loserTeamId,
             winnerTeamId: advanceTeamId,

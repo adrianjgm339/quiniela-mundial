@@ -32,7 +32,7 @@ type Key = { pts: number; gd: number; gf: number };
 
 @Injectable()
 export class AdminGroupsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   private teamName(team: any, locale: string) {
     const t =
@@ -292,7 +292,7 @@ export class AdminGroupsService {
     const sorted = [...block].sort((a, b) => raQ(a.teamId) - raQ(b.teamId));
 
     // Si todavía hay empates exactos por raQ, marcamos needsManual
-    for (let i = 0; i < sorted.length; ) {
+    for (let i = 0; i < sorted.length;) {
       let j = i + 1;
       while (
         j < sorted.length &&
@@ -413,9 +413,29 @@ export class AdminGroupsService {
     const sportSlug = await this.getSeasonSportSlug(seasonId);
     const meta = this.getGroupsFeaturesBySportSlug(sportSlug);
 
-    // groupsClosed: si ya existen standings persistidos para la season, consideramos cerrada la fase de grupos
+    // groupsClosed:
+    // NO basta con que exista GroupStanding, porque "Aplicar manual" también escribe allí.
+    // Consideramos cerrada la fase de grupos solo si:
+    // 1) existen standings persistidos, y
+    // 2) ya no quedan placeholders en partidos KO (fase != F01)
+    const persistedStandingsCount = await this.prisma.groupStanding.count({
+      where: { seasonId },
+    });
+
+    const unresolvedKoPlaceholders = await this.prisma.match.count({
+      where: {
+        seasonId,
+        phaseCode: { not: 'F01' },
+        OR: [
+          { homeTeam: { isPlaceholder: true } },
+          { awayTeam: { isPlaceholder: true } },
+        ],
+      },
+    });
+
     const groupsClosed =
-      (await this.prisma.groupStanding.count({ where: { seasonId } })) > 0;
+      persistedStandingsCount > 0 && unresolvedKoPlaceholders === 0;
+
     (meta as any).groupsClosed = groupsClosed;
 
     // single round-robin por defecto (future-proof para la mayoría de deportes en grupos)
@@ -485,14 +505,36 @@ export class AdminGroupsService {
     const groupCodes =
       teamGroupRows.length > 0
         ? teamGroupRows
-            .map((x) =>
-              String(x.groupCode ?? '')
-                .trim()
-                .toUpperCase(),
-            )
-            .filter(Boolean)
-            .sort((a, b) => a.localeCompare(b))
+          .map((x) =>
+            String(x.groupCode ?? '')
+              .trim()
+              .toUpperCase(),
+          )
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b))
         : 'ABCDEFGHIJKL'.split('');
+
+    const persistedManualRows = await this.prisma.groupStanding.findMany({
+      where: {
+        seasonId,
+        manualOverride: true,
+      },
+      select: {
+        groupCode: true,
+        teamId: true,
+        posGroup: true,
+        manualOverride: true,
+        manualReason: true,
+      },
+    });
+
+    const manualByGroup = new Map<string, any[]>();
+    for (const row of persistedManualRows) {
+      const gc = String(row.groupCode ?? '').trim().toUpperCase();
+      const arr = manualByGroup.get(gc) ?? [];
+      arr.push(row);
+      manualByGroup.set(gc, arr);
+    }
 
     const result: any[] = [];
 
@@ -565,12 +607,38 @@ export class AdminGroupsService {
           ? this.orderGroupWbc([...rowsMap.values()], gMatches)
           : this.orderGroupFifa([...rowsMap.values()], gMatches);
 
-      // asignar posiciones 1..4
+      // asignar posiciones provisionales live
       ordered.forEach((r, idx) => {
-        // NO definimos pos final si hay needsManual dentro de un empate irresoluble:
-        // igual damos pos provisional para UI, pero se marca needsManual
         (r as any).posGroup = idx + 1;
       });
+
+      // Si existe override manual persistido para este grupo, debe prevalecer sobre el cálculo live
+      const manualRows = (manualByGroup.get(groupCode) ?? [])
+        .filter((x: any) => Number(x.posGroup) > 0)
+        .sort((a: any, b: any) => Number(a.posGroup) - Number(b.posGroup));
+
+      if (manualRows.length > 0) {
+        const byId = new Map<string, any>(
+          ordered.map((r: any) => [String(r.teamId), r]),
+        );
+
+        const manualOrdered = manualRows
+          .map((m: any) => byId.get(String(m.teamId)))
+          .filter(Boolean);
+
+        // Solo aplicar si el override cubre exactamente todo el grupo
+        if (manualOrdered.length === ordered.length) {
+          manualOrdered.forEach((r: any, idx: number) => {
+            r.posGroup = idx + 1;
+            r.needsManual = false;
+            r.manualOverride = true;
+            r.manualReason =
+              manualRows[idx]?.manualReason ?? 'Manual group order';
+          });
+
+          ordered.splice(0, ordered.length, ...manualOrdered);
+        }
+      }
 
       // ✅ expectedMatches para F01 debe contar TODOS los equipos del grupo (incluye placeholders),
       // porque en fase de grupos los placeholders tipo “REPECHAJE …” SÍ participan y generan partidos.
@@ -617,17 +685,17 @@ export class AdminGroupsService {
         const third = (g.standings ?? []).find((x: any) => x.posGroup === 3);
         return third
           ? {
-              groupCode: g.groupCode,
-              teamId: third.teamId,
-              name: third.name,
-              flagKey: third.flagKey ?? null,
-              isPlaceholder: !!third.isPlaceholder,
-              points: third.points,
-              gd: third.gd,
-              gf: third.gf,
-              ga: third.ga,
-              fromGroupNeedsManual: !!third.needsManual,
-            }
+            groupCode: g.groupCode,
+            teamId: third.teamId,
+            name: third.name,
+            flagKey: third.flagKey ?? null,
+            isPlaceholder: !!third.isPlaceholder,
+            points: third.points,
+            gd: third.gd,
+            gf: third.gf,
+            ga: third.ga,
+            fromGroupNeedsManual: !!third.needsManual,
+          }
           : null;
       })
       .filter(Boolean) as any[];
@@ -1344,8 +1412,8 @@ export class AdminGroupsService {
     const tieIds = new Set<string>(
       cutoffKey
         ? computedThirds
-            .filter((t) => key(t) === cutoffKey)
-            .map((t) => String(t.teamId))
+          .filter((t) => key(t) === cutoffKey)
+          .map((t) => String(t.teamId))
         : [],
     );
 
@@ -1612,13 +1680,13 @@ export class AdminGroupsService {
 
     const placeholderTeams = placeholderTexts.length
       ? await this.prisma.team.findMany({
-          where: {
-            seasonId,
-            isPlaceholder: true,
-            placeholderRule: { in: placeholderTexts },
-          },
-          select: { id: true, placeholderRule: true },
-        })
+        where: {
+          seasonId,
+          isPlaceholder: true,
+          placeholderRule: { in: placeholderTexts },
+        },
+        select: { id: true, placeholderRule: true },
+      })
       : [];
 
     const placeholderMap = new Map<string, string>(); // placeholderText -> placeholderTeamId
@@ -1737,16 +1805,16 @@ export class AdminGroupsService {
     const slots =
       auto.updatedCount > 0
         ? await this.prisma.bracketSlot.findMany({
-            where: { seasonId, round: 'R32' },
-            include: {
-              team: {
-                include: {
-                  translations: true,
-                },
+          where: { seasonId, round: 'R32' },
+          include: {
+            team: {
+              include: {
+                translations: true,
               },
             },
-            orderBy: [{ matchNo: 'asc' }, { slot: 'asc' }],
-          })
+          },
+          orderBy: [{ matchNo: 'asc' }, { slot: 'asc' }],
+        })
         : slots0;
 
     return {
