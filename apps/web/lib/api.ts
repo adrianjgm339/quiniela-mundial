@@ -150,6 +150,7 @@ export type ApiMatch = {
   timeUtc: string;   // "19:00"
   utcDateTime: string;
   closeUtc: string | null;
+  closeMinutes?: number | null;
   venue?: string | null;
   status: string;
   score: null | {

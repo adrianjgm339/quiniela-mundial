@@ -435,7 +435,7 @@ export default function LeagueSettingsPage() {
 
             {!canManageRoles && (
               <div className="text-xs text-amber-200">
-                Solo OWNER/ADMIN puede renombrar la liga.
+                Solo el Administrador puede renombrar la liga.
               </div>
             )}
           </div>
@@ -510,7 +510,7 @@ export default function LeagueSettingsPage() {
 
                 {!canManageRoles && (
                   <div className="text-xs text-amber-200 mt-2">
-                    Solo OWNER/ADMIN puede rotar el código.
+                    Solo el Administrador puede rotar el código.
                   </div>
                 )}
               </div>
@@ -549,7 +549,7 @@ export default function LeagueSettingsPage() {
                 </button>
               </div>
 
-              <div className="text-xs text-zinc-500">Nota: el backend bloqueará cambios si el torneo ya inició.</div>
+              <div className="text-xs text-zinc-500">Nota: el sistema bloqueará cambios si el torneo ya inició.</div>
             </div>
           )}
         </div>
@@ -559,7 +559,7 @@ export default function LeagueSettingsPage() {
           <div className="p-5 border-b border-[var(--border)]">
             <div className="font-semibold">Solicitudes pendientes</div>
             <div className="text-sm text-[color:var(--muted)] mt-1">
-              Solo visible para <span className="text-[var(--foreground)]">OWNER/ADMIN</span>.
+              Solo visible para <span className="text-[var(--foreground)]">Rol Administrador</span>.
             </div>
           </div>
 
@@ -610,7 +610,7 @@ export default function LeagueSettingsPage() {
         <div className="p-5 border-b border-[var(--border)]">
           <div className="font-semibold">Miembros</div>
           <div className="text-sm text-[color:var(--muted)] mt-1">
-            Solo el <span className="text-[var(--foreground)]">OWNER</span> o un <span className="text-[var(--foreground)]">ADMIN</span> de la
+            Solo el <span className="text-[var(--foreground)]">Aministrador</span> de la
             liga puede asignar admins.
             {myRole === 'MEMBER' && (
               <div className="text-xs text-amber-200 mt-2">
@@ -643,7 +643,7 @@ export default function LeagueSettingsPage() {
                   <div className="flex gap-2">
                     {isOwner ? (
                       <span className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] text-sm">
-                        OWNER (no editable)
+                        Administrador (no editable)
                       </span>
                     ) : (
                       <>

@@ -99,13 +99,21 @@ function formatLocalDateTime(locale: string, utcIso?: string | null) {
 
 function formatCountdown(ms: number) {
   const totalMin = Math.floor(ms / 60_000);
-  if (totalMin <= 0) return '0m';
+  if (totalMin <= 0) return 'Cerrado';
 
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
+  const days = Math.floor(totalMin / (24 * 60));
+  const hours = Math.floor((totalMin % (24 * 60)) / 60);
+  const minutes = totalMin % 60;
 
-  if (h <= 0) return `${m}m`;
-  return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  return `${minutes}m`;
 }
 
 export default function MatchesPage() {
@@ -214,12 +222,11 @@ export default function MatchesPage() {
 
   function isLocked(m: MatchWithExtras) {
     if (m.resultConfirmed) return true;
-    if (!m.closeUtc) return false;
 
-    const closeMs = new Date(m.closeUtc).getTime();
-    if (Number.isNaN(closeMs)) return false;
+    const closeTs = getCloseTs(m);
+    if (!closeTs) return false;
 
-    return Date.now() > closeMs;
+    return now >= closeTs;
   }
 
   // Liga “efectiva”: solo cuenta si existe y pertenece al evento actual
@@ -1203,6 +1210,18 @@ export default function MatchesPage() {
 
                           <div className="text-sm text-[color:var(--muted)] truncate">
                             {m.timeUtc} UTC · {m.venue ?? '—'}
+                          </div>
+
+                          <div className="text-sm text-[color:var(--muted)] truncate">
+                            {locked ? (
+                              <span className="font-medium text-[color:var(--destructive)]">Cerrado</span>
+                            ) : remainingMs != null ? (
+                              <>
+                                Cierra en: <span className="font-medium text-[color:var(--foreground)]">{formatCountdown(remainingMs)}</span>
+                              </>
+                            ) : (
+                              <span>Hora de cierre no disponible</span>
+                            )}
                           </div>
 
                           {effectiveLeagueId && myPick && (
