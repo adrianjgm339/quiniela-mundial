@@ -59,10 +59,38 @@ export class MatchesService {
     seasonId: string;
     phaseCode: string;
     matchNumber: number | null;
+    sourceMatchId?: string | null;
   }) {
-    const { seasonId, phaseCode, matchNumber } = args;
-    const n = matchNumber != null ? String(matchNumber) : null;
+    const { seasonId, phaseCode, matchNumber, sourceMatchId } = args;
 
+    let effectiveMatchNumber: number | null = matchNumber ?? null;
+
+    // Fallback: si el KO no tiene matchNumber, lo derivamos por orden dentro de la fase
+    // usando utcDateTime asc y externalId asc como desempate estable.
+    if (effectiveMatchNumber == null && sourceMatchId) {
+      const phaseMatches = await this.prisma.match.findMany({
+        where: {
+          seasonId,
+          phaseCode,
+        },
+        select: {
+          id: true,
+          utcDateTime: true,
+          externalId: true,
+        },
+        orderBy: [
+          { utcDateTime: 'asc' },
+          { externalId: 'asc' },
+        ],
+      });
+
+      const idx = phaseMatches.findIndex((m) => m.id === sourceMatchId);
+      if (idx >= 0) {
+        effectiveMatchNumber = idx + 1;
+      }
+    }
+
+    const n = effectiveMatchNumber != null ? String(effectiveMatchNumber) : null;
     const tokens: string[] = [];
 
     if (n) {
@@ -348,16 +376,19 @@ export class MatchesService {
     seasonId: string;
     phaseCode: string;
     sourceMatchNumber: number | null;
+    sourceMatchId?: string | null;
     winnerTeamId: string;
   }) {
-    const { seasonId, phaseCode, sourceMatchNumber, winnerTeamId } = args;
-    if (!sourceMatchNumber) return;
+    const { seasonId, phaseCode, sourceMatchNumber, sourceMatchId, winnerTeamId } = args;
 
     const tokens = await this.buildKoReferenceTokens({
       seasonId,
       phaseCode,
       matchNumber: sourceMatchNumber,
+      sourceMatchId,
     });
+
+    if (tokens.length === 0) return;
 
     const placeholderTeams = await this.prisma.team.findMany({
       where: {
@@ -396,17 +427,20 @@ export class MatchesService {
     seasonId: string;
     phaseCode: string;
     sourceMatchNumber: number | null;
+    sourceMatchId?: string | null;
     loserTeamId: string;
     winnerTeamId: string;
   }) {
-    const { seasonId, phaseCode, sourceMatchNumber, loserTeamId, winnerTeamId } = args;
-    if (!sourceMatchNumber) return;
+    const { seasonId, phaseCode, sourceMatchNumber, sourceMatchId, loserTeamId, winnerTeamId } = args;
 
     const tokens = await this.buildKoReferenceTokens({
       seasonId,
       phaseCode,
       matchNumber: sourceMatchNumber,
+      sourceMatchId,
     });
+
+    if (tokens.length === 0) return;
 
     const ruleMatch = buildPlaceholderRuleOr(tokens);
 
@@ -680,10 +714,12 @@ export class MatchesService {
         continue;
       }
 
-      await this.propagateWinnerToNextMatches({
+      await this.propagateLoserToNextMatches({
         seasonId: m.seasonId,
         phaseCode: m.phaseCode,
         sourceMatchNumber: m.matchNumber,
+        sourceMatchId: m.id,
+        loserTeamId,
         winnerTeamId,
       });
       repairedWinners += 1;
@@ -981,6 +1017,7 @@ export class MatchesService {
         seasonId: match.seasonId,
         phaseCode: match.phaseCode,
         sourceMatchNumber: match.matchNumber ?? null,
+        sourceMatchId: match.id,
         winnerTeamId: advanceTeamId,
       });
 
@@ -996,6 +1033,7 @@ export class MatchesService {
             seasonId: match.seasonId,
             phaseCode: match.phaseCode,
             sourceMatchNumber: match.matchNumber ?? null,
+            sourceMatchId: match.id,
             loserTeamId,
             winnerTeamId: advanceTeamId,
           });
