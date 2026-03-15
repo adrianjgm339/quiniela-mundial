@@ -33,32 +33,6 @@ function isAnyResultFieldPresent(dto: UpdateMatchResultDto) {
   );
 }
 
-function buildKoReferenceTokens(args: {
-  phaseCode: string;
-  matchNumber: number | null;
-}) {
-  const { phaseCode, matchNumber } = args;
-  const n = matchNumber != null ? String(matchNumber) : null;
-
-  const tokens: string[] = [];
-
-  if (n) {
-    tokens.push(`partido ${n}`);
-  }
-
-  // Convención abreviada usada en placeholders de béisbol:
-  // F02 -> QF1..QF4
-  // F03 -> SF1..SF2
-  // F04 -> F1 (si alguna vez se usa)
-  // F05 -> también SF1..SF2 en algunos eventos
-  if (n) {
-    if (phaseCode === 'F02') tokens.push(`QF${n}`);
-    if (phaseCode === 'F03' || phaseCode === 'F05') tokens.push(`SF${n}`);
-    if (phaseCode === 'F04' || phaseCode === 'F07') tokens.push(`F${n}`);
-  }
-
-  return Array.from(new Set(tokens));
-}
 
 function buildPlaceholderRuleOr(tokens: string[]) {
   const clauses: Array<any> = [];
@@ -80,6 +54,57 @@ function buildPlaceholderRuleOr(tokens: string[]) {
 @Injectable()
 export class MatchesService {
   constructor(private prisma: PrismaService) { }
+
+  private async buildKoReferenceTokens(args: {
+    seasonId: string;
+    phaseCode: string;
+    matchNumber: number | null;
+  }) {
+    const { seasonId, phaseCode, matchNumber } = args;
+    const n = matchNumber != null ? String(matchNumber) : null;
+
+    const tokens: string[] = [];
+
+    if (n) {
+      tokens.push(`partido ${n}`);
+    }
+
+    if (!n) {
+      return tokens;
+    }
+
+    // Detectamos la estructura KO real del evento:
+    // - Compacta (béisbol típico): F02=QF, F03=SF, F04=F
+    // - Larga (fútbol típico):     F04=QF, F05=SF, F07=F
+    const phaseRows = await this.prisma.match.findMany({
+      where: {
+        seasonId,
+        phaseCode: { in: ['F02', 'F03', 'F04', 'F05', 'F06', 'F07'] },
+      },
+      select: { phaseCode: true },
+      distinct: ['phaseCode'],
+    });
+
+    const phases = new Set(phaseRows.map((x) => x.phaseCode));
+    const isCompactKo =
+      phases.has('F02') &&
+      phases.has('F03') &&
+      phases.has('F04') &&
+      !phases.has('F05') &&
+      !phases.has('F07');
+
+    if (isCompactKo) {
+      if (phaseCode === 'F02') tokens.push(`QF${n}`);
+      if (phaseCode === 'F03') tokens.push(`SF${n}`);
+      if (phaseCode === 'F04') tokens.push(`F${n}`);
+    } else {
+      if (phaseCode === 'F04') tokens.push(`QF${n}`);
+      if (phaseCode === 'F05') tokens.push(`SF${n}`);
+      if (phaseCode === 'F07') tokens.push(`F${n}`);
+    }
+
+    return Array.from(new Set(tokens));
+  }
 
   async list(args: ListArgs) {
     const { userId, locale, phaseCode, groupCode } = args;
@@ -328,7 +353,8 @@ export class MatchesService {
     const { seasonId, phaseCode, sourceMatchNumber, winnerTeamId } = args;
     if (!sourceMatchNumber) return;
 
-    const tokens = buildKoReferenceTokens({
+    const tokens = await this.buildKoReferenceTokens({
+      seasonId,
       phaseCode,
       matchNumber: sourceMatchNumber,
     });
@@ -376,7 +402,8 @@ export class MatchesService {
     const { seasonId, phaseCode, sourceMatchNumber, loserTeamId, winnerTeamId } = args;
     if (!sourceMatchNumber) return;
 
-    const tokens = buildKoReferenceTokens({
+    const tokens = await this.buildKoReferenceTokens({
+      seasonId,
       phaseCode,
       matchNumber: sourceMatchNumber,
     });
@@ -590,6 +617,96 @@ export class MatchesService {
       restoredFuturePlaceholders: safeToFix.length,
       skippedBadExternalId: skippedBadExternalId.length,
       skippedMissingTeams: skippedMissingTeams.length,
+    };
+  }
+
+  async repairKo(args: { seasonId: string }) {
+    const { seasonId } = args;
+
+    const confirmedKo = await this.prisma.match.findMany({
+      where: {
+        seasonId,
+        resultConfirmed: true,
+        phaseCode: { in: ['F02', 'F03', 'F04', 'F05', 'F06', 'F07'] },
+      },
+      select: {
+        id: true,
+        seasonId: true,
+        phaseCode: true,
+        matchNumber: true,
+        homeTeamId: true,
+        awayTeamId: true,
+        homeScore: true,
+        awayScore: true,
+        advanceTeamId: true,
+      },
+      orderBy: [
+        { phaseCode: 'asc' },
+        { matchNumber: 'asc' },
+      ],
+    });
+
+    let repairedWinners = 0;
+    let repairedLosers = 0;
+    let skipped = 0;
+
+    for (const m of confirmedKo) {
+      if (!m.homeTeamId || !m.awayTeamId) {
+        skipped += 1;
+        continue;
+      }
+
+      let winnerTeamId: string | null = null;
+      let loserTeamId: string | null = null;
+
+      const hs = m.homeScore;
+      const as = m.awayScore;
+
+      if (m.advanceTeamId) {
+        winnerTeamId = m.advanceTeamId;
+        loserTeamId =
+          m.advanceTeamId === m.homeTeamId ? m.awayTeamId : m.homeTeamId;
+      } else if (hs != null && as != null) {
+        if (hs === as) {
+          skipped += 1;
+          continue;
+        }
+        winnerTeamId = hs > as ? m.homeTeamId : m.awayTeamId;
+        loserTeamId = hs > as ? m.awayTeamId : m.homeTeamId;
+      }
+
+      if (!winnerTeamId || !loserTeamId) {
+        skipped += 1;
+        continue;
+      }
+
+      await this.propagateWinnerToNextMatches({
+        seasonId: m.seasonId,
+        phaseCode: m.phaseCode,
+        sourceMatchNumber: m.matchNumber,
+        winnerTeamId,
+      });
+      repairedWinners += 1;
+
+      if (m.phaseCode === 'F05') {
+        await this.propagateLoserToNextMatches({
+          seasonId: m.seasonId,
+          phaseCode: m.phaseCode,
+          sourceMatchNumber: m.matchNumber,
+          loserTeamId,
+          winnerTeamId,
+        });
+        repairedLosers += 1;
+      }
+    }
+
+    return {
+      ok: true,
+      seasonId,
+      scanned: confirmedKo.length,
+      repairedWinners,
+      repairedLosers,
+      skipped,
     };
   }
 

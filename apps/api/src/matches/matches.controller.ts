@@ -16,7 +16,7 @@ import { UpdateMatchResultDto } from './dto/update-match-result.dto';
 
 @Controller('matches')
 export class MatchesController {
-  constructor(private readonly matches: MatchesService) {}
+  constructor(private readonly matches: MatchesService) { }
 
   @UseGuards(JwtAuthGuard)
   @Get()
@@ -72,5 +72,24 @@ export class MatchesController {
     }
 
     return this.matches.resetKo({ seasonId, mode });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('admin/repair-ko')
+  async repairKo(
+    @Req() req: any,
+    @Query('seasonId') seasonId?: string,
+  ) {
+    const role = req.user?.role;
+    if (role !== 'ADMIN') {
+      const { ForbiddenException } = require('@nestjs/common');
+      throw new ForbiddenException('Admin only');
+    }
+
+    if (!seasonId) {
+      throw new BadRequestException('seasonId is required');
+    }
+
+    return this.matches.repairKo({ seasonId });
   }
 }
