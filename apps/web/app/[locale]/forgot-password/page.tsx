@@ -1,8 +1,8 @@
 "use client";
-
 import Image from "next/image";
 import { useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { forgotPassword } from "@/lib/api";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -17,11 +17,24 @@ export default function ForgotPasswordPage() {
 
   const [email, setEmail] = useState(prefilledEmail);
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    // UX segura: mensaje genérico (sin revelar si existe el correo)
-    setSent(true);
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      await forgotPassword(email);
+      setSent(true);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "No se pudo enviar la solicitud.";
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -79,11 +92,18 @@ export default function ForgotPasswordPage() {
               />
             </label>
 
+            {error ? (
+              <div className="rounded-xl border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 p-3 text-sm text-[var(--destructive)]">
+                {error}
+              </div>
+            ) : null}
+
             <button
               type="submit"
-              className="h-10 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--accent-foreground)]"
+              disabled={submitting}
+              className="h-10 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--accent-foreground)] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Enviar instrucciones
+              {submitting ? "Enviando..." : "Enviar instrucciones"}
             </button>
 
             <button

@@ -6,8 +6,9 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
+import { Resend } from 'resend';
 
 @Injectable()
 export class AuthService {
@@ -22,14 +23,86 @@ export class AuthService {
     this.googleClient = new OAuth2Client(clientId);
   }
 
+  private sha256(value: string) {
+    return createHash('sha256').update(value).digest('hex');
+  }
+
+  private getResend() {
+    const apiKey = (process.env.RESEND_API_KEY || '').trim();
+    if (!apiKey) {
+      throw new BadRequestException('RESEND_API_KEY is not configured');
+    }
+    return new Resend(apiKey);
+  }
+
+  private getMailFrom() {
+    const mailFrom = (process.env.MAIL_FROM || '').trim();
+    if (!mailFrom) {
+      throw new BadRequestException('MAIL_FROM is not configured');
+    }
+    return mailFrom;
+  }
+
+  private getAppBaseUrl() {
+    const appBaseUrl = (process.env.APP_BASE_URL || '').trim();
+    if (!appBaseUrl) {
+      throw new BadRequestException('APP_BASE_URL is not configured');
+    }
+    return appBaseUrl.replace(/\/+$/, '');
+  }
+
+  private async sendVerificationEmail(input: { userId: string; email: string; locale?: string }) {
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = this.sha256(rawToken);
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24 horas
+
+    await this.prisma.emailVerificationToken.create({
+      data: {
+        userId: input.userId,
+        tokenHash,
+        expiresAt,
+      },
+    });
+
+    const locale = (input.locale || 'es').trim() || 'es';
+    const appBaseUrl = this.getAppBaseUrl();
+    const verifyUrl = `${appBaseUrl}/${locale}/verify-email?token=${encodeURIComponent(rawToken)}`;
+
+    const resend = this.getResend();
+    const from = this.getMailFrom();
+
+    await resend.emails.send({
+      from,
+      to: input.email,
+      subject: 'Verifica tu correo - QuinielaManía',
+      html: `
+        <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111">
+          <h2>Verifica tu correo</h2>
+          <p>Gracias por crear tu cuenta en QuinielaManía.</p>
+          <p>Para activar tu cuenta, confirma tu correo haciendo clic en el siguiente botón:</p>
+          <p>
+            <a href="${verifyUrl}" style="display:inline-block;padding:10px 16px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;">
+              Verificar correo
+            </a>
+          </p>
+          <p>Si el botón no te funciona, copia y pega este enlace en tu navegador:</p>
+          <p>${verifyUrl}</p>
+          <p>Este enlace vence en 24 horas.</p>
+        </div>
+      `,
+    });
+  }
+
   async register(input: {
     email: string;
     password: string;
     displayName: string;
+    locale?: string;
   }) {
     const email = (input.email || '').trim().toLowerCase();
     const password = input.password || '';
     const displayName = (input.displayName || '').trim();
+    const locale = (input.locale || 'es').trim() || 'es';
 
     if (!email || !password || !displayName) {
       throw new BadRequestException(
@@ -48,17 +121,20 @@ export class AuthService {
         id: true,
         email: true,
         displayName: true,
-        role: true,
-        createdAt: true,
       },
     });
 
-    const token = this.jwt.sign({
-      sub: user.id,
+    await this.sendVerificationEmail({
+      userId: user.id,
       email: user.email,
-      role: user.role,
+      locale,
     });
-    return { user, token };
+
+    return {
+      ok: true,
+      message: 'Te enviamos un correo para verificar tu cuenta.',
+      email: user.email,
+    };
   }
 
   async login(input: { email: string; password: string }) {
@@ -70,6 +146,10 @@ export class AuthService {
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
+
+    if (!user.emailVerifiedAt) {
+      throw new UnauthorizedException('Email not verified');
+    }
 
     const safeUser = {
       id: user.id,
@@ -125,7 +205,15 @@ export class AuthService {
           email,
           passwordHash,
           displayName,
+          emailVerifiedAt: new Date(),
         },
+      });
+    }
+
+    if (!user.emailVerifiedAt) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerifiedAt: new Date() },
       });
     }
 
@@ -145,13 +233,155 @@ export class AuthService {
     return { user: safeUser, token };
   }
 
-  async forgotPassword(input: { email: string }) {
-    // Stub MVP anti-enumeration:
-    // Siempre respondemos OK, exista o no exista el email.
-    // Luego lo conectamos a email provider + token reset.
+  async verifyEmail(input: { token: string }) {
+    const rawToken = (input.token || '').trim();
+    if (!rawToken) {
+      throw new BadRequestException('token is required');
+    }
+
+    const tokenHash = this.sha256(rawToken);
+
+    const verificationToken =
+      await this.prisma.emailVerificationToken.findUnique({
+        where: { tokenHash },
+      });
+
+    if (!verificationToken) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    if (verificationToken.usedAt) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    if (verificationToken.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: verificationToken.userId },
+        data: { emailVerifiedAt: new Date() },
+      }),
+      this.prisma.emailVerificationToken.update({
+        where: { id: verificationToken.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
     return {
       ok: true,
+      message: 'Correo verificado correctamente.',
+    };
+  }
+
+  async forgotPassword(input: { email: string }) {
+    const email = (input.email || '').trim().toLowerCase();
+
+    if (!email) {
+      throw new BadRequestException('email is required');
+    }
+
+    const genericResponse = {
+      ok: true,
       message: 'Si existe una cuenta con ese email, recibirás instrucciones.',
+    };
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return genericResponse;
+    }
+
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = this.sha256(rawToken);
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60); // 1 hora
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      },
+    });
+
+    const appBaseUrl = this.getAppBaseUrl();
+    const resetUrl = `${appBaseUrl}/es/reset-password?token=${encodeURIComponent(rawToken)}`;
+
+    const resend = this.getResend();
+    const from = this.getMailFrom();
+
+    await resend.emails.send({
+      from,
+      to: user.email,
+      subject: 'Recupera tu contraseña - QuinielaManía',
+      html: `
+        <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111">
+          <h2>Recuperar contraseña</h2>
+          <p>Recibimos una solicitud para restablecer tu contraseña.</p>
+          <p>
+            <a href="${resetUrl}" style="display:inline-block;padding:10px 16px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;">
+              Restablecer contraseña
+            </a>
+          </p>
+          <p>Si el botón no te funciona, copia y pega este enlace en tu navegador:</p>
+          <p>${resetUrl}</p>
+          <p>Este enlace vence en 1 hora.</p>
+          <p>Si no solicitaste este cambio, puedes ignorar este correo.</p>
+        </div>
+      `,
+    });
+
+    return genericResponse;
+  }
+
+  async resetPassword(input: { token: string; password: string }) {
+    const rawToken = (input.token || '').trim();
+    const password = input.password || '';
+
+    if (!rawToken) {
+      throw new BadRequestException('token is required');
+    }
+
+    if (password.length < 6) {
+      throw new BadRequestException(
+        'password must be at least 6 characters',
+      );
+    }
+
+    const tokenHash = this.sha256(rawToken);
+
+    const resetToken = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+    });
+
+    if (!resetToken) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    if (resetToken.usedAt) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    if (resetToken.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Invalid or expired token');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: resetToken.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
+    return {
+      ok: true,
+      message: 'Contraseña restablecida correctamente.',
     };
   }
 
@@ -257,32 +487,32 @@ export class AuthService {
       ...user,
       activeSeason: user.activeSeason
         ? {
-            id: user.activeSeason.id,
-            slug: user.activeSeason.slug,
+          id: user.activeSeason.id,
+          slug: user.activeSeason.slug,
+          name: pickName(
+            user.activeSeason.translations,
+            locale,
+            user.activeSeason.slug,
+          ),
+          competition: {
+            id: user.activeSeason.competition.id,
+            slug: user.activeSeason.competition.slug,
             name: pickName(
-              user.activeSeason.translations,
+              user.activeSeason.competition.translations,
               locale,
-              user.activeSeason.slug,
+              user.activeSeason.competition.slug,
             ),
-            competition: {
-              id: user.activeSeason.competition.id,
-              slug: user.activeSeason.competition.slug,
+            sport: {
+              id: user.activeSeason.competition.sport.id,
+              slug: user.activeSeason.competition.sport.slug,
               name: pickName(
-                user.activeSeason.competition.translations,
+                user.activeSeason.competition.sport.translations,
                 locale,
-                user.activeSeason.competition.slug,
+                user.activeSeason.competition.sport.slug,
               ),
-              sport: {
-                id: user.activeSeason.competition.sport.id,
-                slug: user.activeSeason.competition.sport.slug,
-                name: pickName(
-                  user.activeSeason.competition.sport.translations,
-                  locale,
-                  user.activeSeason.competition.sport.slug,
-                ),
-              },
             },
-          }
+          },
+        }
         : null,
     };
   }

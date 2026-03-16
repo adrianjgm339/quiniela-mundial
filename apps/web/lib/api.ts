@@ -44,7 +44,6 @@ export async function forgotPassword(email: string) {
     body: JSON.stringify({ email }),
   });
 
-  // Siempre OK (anti-enumeration), pero igual manejamos errores de red/500
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(text || `Forgot password failed (${res.status})`);
@@ -53,17 +52,37 @@ export async function forgotPassword(email: string) {
   return res.json() as Promise<{ ok: boolean; message: string }>;
 }
 
-export type RegisterResponse = LoginResponse;
+export async function resetPassword(token: string, password: string) {
+  const res = await fetch(`${API_BASE}/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Reset password failed (${res.status})`);
+  }
+
+  return res.json() as Promise<{ ok: boolean; message: string }>;
+}
+
+export type RegisterResponse = {
+  ok: boolean;
+  message: string;
+  email: string;
+};
 
 export async function register(
   email: string,
   password: string,
-  displayName: string
+  displayName: string,
+  locale?: string
 ): Promise<RegisterResponse> {
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, displayName }),
+    body: JSON.stringify({ email, password, displayName, locale }),
   });
 
   if (!res.ok) {
@@ -72,6 +91,21 @@ export async function register(
   }
 
   return res.json();
+}
+
+export async function verifyEmail(token: string) {
+  const res = await fetch(`${API_BASE}/auth/verify-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Verify email failed (${res.status})`);
+  }
+
+  return res.json() as Promise<{ ok: boolean; message: string }>;
 }
 
 export async function me(token: string, locale: string) {

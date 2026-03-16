@@ -14,11 +14,11 @@ import { JwtAuthGuard } from './jwt.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService) { }
 
   @Post('register')
   register(
-    @Body() body: { email: string; password: string; displayName: string },
+    @Body() body: { email: string; password: string; displayName: string; locale?: string },
   ) {
     return this.auth.register(body);
   }
@@ -36,9 +36,21 @@ export class AuthController {
   }
 
   @HttpCode(200)
+  @Post('verify-email')
+  verifyEmail(@Body() body: { token: string }) {
+    return this.auth.verifyEmail(body);
+  }
+
+  @HttpCode(200)
   @Post('forgot-password')
   forgotPassword(@Body() body: { email: string }) {
     return this.auth.forgotPassword(body);
+  }
+
+  @HttpCode(200)
+  @Post('reset-password')
+  resetPassword(@Body() body: { token: string; password: string }) {
+    return this.auth.resetPassword(body);
   }
 
   @Get('me')

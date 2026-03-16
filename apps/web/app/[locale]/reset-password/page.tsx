@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { resetPassword } from "@/lib/api";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -17,8 +18,9 @@ export default function ResetPasswordPage() {
   const [password2, setPassword2] = useState("");
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -26,8 +28,18 @@ export default function ResetPasswordPage() {
     if (password.length < 6) return setError("La clave debe tener al menos 6 caracteres.");
     if (password !== password2) return setError("Las claves no coinciden.");
 
-    // UI por ahora (si luego agregan endpoint, lo conectamos aquí)
-    setDone(true);
+    setSubmitting(true);
+
+    try {
+      await resetPassword(token, password);
+      setDone(true);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "No se pudo restablecer la contraseña.";
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -73,16 +85,7 @@ export default function ResetPasswordPage() {
           </div>
         ) : (
           <form onSubmit={onSubmit} className="mt-6 grid gap-4">
-            <label className="grid gap-2">
-              <span className="text-sm font-medium text-[var(--foreground)]">Token</span>
-              <input
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                required
-                className="h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-            </label>
-
+            
             <label className="grid gap-2">
               <span className="text-sm font-medium text-[var(--foreground)]">Nueva clave</span>
               <input
@@ -115,9 +118,10 @@ export default function ResetPasswordPage() {
 
             <button
               type="submit"
-              className="h-10 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--accent-foreground)]"
+              disabled={submitting}
+              className="h-10 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--accent-foreground)] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Guardar nueva clave
+              {submitting ? "Guardando..." : "Guardar nueva clave"}
             </button>
           </form>
         )}

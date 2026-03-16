@@ -36,6 +36,8 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const locale = params.locale ?? "es";
 
+  const registered = searchParams.get("registered") === "1";
+
   const prefilledEmail = useMemo(() => {
     const e = searchParams.get("email") ?? "";
     return e.trim().toLowerCase();
@@ -79,8 +81,14 @@ export default function LoginPage() {
       const data = await apiLogin(email, password);
       localStorage.setItem("token", data.token);
       router.push(`/${locale}/dashboard`);
-    } catch {
-      setError("Credenciales inválidas.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+
+      if (msg.includes("Email not verified")) {
+        setError("Debes verificar tu correo antes de iniciar sesión.");
+      } else {
+        setError("Correo/contraseña inválido(s).");
+      }
     } finally {
       setLoading(false);
     }
@@ -174,6 +182,12 @@ export default function LoginPage() {
                 className="h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               />
             </label>
+
+            {registered ? (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300">
+                Te enviamos un correo para verificar tu cuenta antes de iniciar sesión.
+              </div>
+            ) : null}
 
             {error ? (
               <div className="rounded-xl border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 p-3 text-sm text-[var(--destructive)]">

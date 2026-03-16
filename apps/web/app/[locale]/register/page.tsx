@@ -29,9 +29,8 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const data = await apiRegister(email, password, displayName);
-      localStorage.setItem("token", data.token);
-      router.push(`/${locale}/dashboard`);
+      await apiRegister(email, password, displayName, locale);
+      router.push(`/${locale}/login?registered=1&email=${encodeURIComponent(email.trim())}`);
     } catch {
       // Mensaje genérico (anti-enumeration + UX simple)
       setError("No se pudo crear la cuenta. Verifica los datos e intenta de nuevo.");
